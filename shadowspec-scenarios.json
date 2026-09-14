@@ -1,87 +1,107 @@
 [
   {
     "id": 1,
-    "method": "POST",
-    "path": "/orders",
-    "requestBody": {
-      "quantity": 4,
-      "productId": 321,
-      "customerId": 888
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 4,
+        "productId": 321,
+        "customerId": 888
+      }
     },
-    "expectedStatus": 201,
-    "expectedBody": {
-      "status": "created",
-      "quantity": 4,
-      "productId": 321,
-      "customerId": 888
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 4,
+        "productId": 321,
+        "customerId": 888
+      }
     }
   },
   {
     "id": 2,
-    "method": "POST",
-    "path": "/orders",
-    "requestBody": {
-      "quantity": 1,
-      "productId": 555,
-      "customerId": 999
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 1,
+        "productId": 555,
+        "customerId": 999
+      }
     },
-    "expectedStatus": 201,
-    "expectedBody": {
-      "status": "created",
-      "quantity": 1,
-      "productId": 555,
-      "customerId": 999
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 1,
+        "productId": 555,
+        "customerId": 999
+      }
     }
   },
   {
     "id": 3,
-    "method": "POST",
-    "path": "/orders",
-    "requestBody": {
-      "quantity": 2,
-      "productId": 777,
-      "customerId": 1111
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 2,
+        "productId": 777,
+        "customerId": 1111
+      }
     },
-    "expectedStatus": 201,
-    "expectedBody": {
-      "status": "created",
-      "quantity": 2,
-      "productId": 777,
-      "customerId": 1111
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 2,
+        "productId": 777,
+        "customerId": 1111
+      }
     }
   },
   {
     "id": 4,
-    "method": "POST",
-    "path": "/orders",
-    "requestBody": {
-      "quantity": 5,
-      "productId": 777,
-      "customerId": 1111
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 5,
+        "productId": 777,
+        "customerId": 1111
+      }
     },
-    "expectedStatus": 201,
-    "expectedBody": {
-      "status": "created",
-      "quantity": 5,
-      "productId": 777,
-      "customerId": 1111
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 5,
+        "productId": 777,
+        "customerId": 1111
+      }
     }
   },
   {
     "id": 5,
-    "method": "POST",
-    "path": "/orders",
-    "requestBody": {
-      "quantity": 3,
-      "productId": 5678,
-      "customerId": 1234
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 3,
+        "productId": 5678,
+        "customerId": 1234
+      }
     },
-    "expectedStatus": 201,
-    "expectedBody": {
-      "status": "created",
-      "quantity": 3,
-      "productId": 5678,
-      "customerId": 1234
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 3,
+        "productId": 5678,
+        "customerId": 1234
+      }
     }
   }
 ]

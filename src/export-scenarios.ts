@@ -1,6 +1,6 @@
-import { sanitizeObject } from "./sanitize";
 import fs from "fs";
 import { getScenarios } from "./scenario";
+import { sanitizeObject } from "./sanitize";
 
 async function main() {
   const scenarios = await getScenarios();
@@ -12,11 +12,17 @@ async function main() {
 
   const output = scenarios.map((scenario, index) => ({
     id: index + 1,
-    method: scenario.method,
-    path: scenario.path,
-    requestBody: scenario.request_body,
-    expectedStatus: scenario.response_status,
-    expectedBody: sanitizeObject(scenario.response_body)
+
+    request: {
+      method: scenario.method,
+      path: scenario.path,
+      body: sanitizeObject(scenario.request_body)
+    },
+
+    expected: {
+      status: scenario.response_status,
+      body: sanitizeObject(scenario.response_body)
+    }
   }));
 
   fs.writeFileSync(

@@ -2,11 +2,17 @@ import fs from "fs";
 
 export type ShadowSpecScenario = {
   id: number;
-  method: string;
-  path: string;
-  requestBody: unknown;
-  expectedStatus: number;
-  expectedBody: unknown;
+
+  request: {
+    method: string;
+    path: string;
+    body: unknown;
+  };
+
+  expected: {
+    status: number;
+    body: unknown;
+  };
 };
 
 export function loadScenarios(): ShadowSpecScenario[] {

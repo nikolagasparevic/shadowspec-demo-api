@@ -27,18 +27,18 @@ async function main() {
     console.log(scenario);
 
     const result = await replayRequest(
-      scenario.method,
-      scenario.path,
-      scenario.requestBody
+      scenario.request.method,
+      scenario.request.path,
+      scenario.request.body
     );
 
     console.log("Replay:");
     console.log(result);
 
     const comparison = compareResponses(
-      scenario.expectedBody,
+      scenario.expected.body,
       result.body,
-      scenario.expectedStatus,
+      scenario.expected.status,
       result.status
     );
 
@@ -81,18 +81,19 @@ async function main() {
   console.log("================================");
 
   const report = createReport(
-  scenarios.length,
-  passed,
-  failed,
-  failures
-);
-fs.writeFileSync(
-  "shadowspec-report.json",
-  JSON.stringify(report, null, 2)
-);
+    scenarios.length,
+    passed,
+    failed,
+    failures
+  );
 
-console.log("\nShadowSpec Report:");
-console.log(JSON.stringify(report, null, 2));
+  fs.writeFileSync(
+    "shadowspec-report.json",
+    JSON.stringify(report, null, 2)
+  );
+
+  console.log("\nShadowSpec Report:");
+  console.log(JSON.stringify(report, null, 2));
 
   if (failed > 0) {
     throw new Error(`ShadowSpec detected ${failed} regression(s).`);
