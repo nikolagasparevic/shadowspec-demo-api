@@ -2,6 +2,24 @@ import fs from "fs";
 import { getScenarios } from "./scenario";
 import { sanitizeObject } from "./sanitize";
 
+function containsField(value: any, field: string): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => containsField(item, field));
+  }
+
+  if (value !== null && typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, field)) {
+      return true;
+    }
+
+    return Object.values(value).some((item) =>
+      containsField(item, field)
+    );
+  }
+
+  return false;
+}
+
 async function main() {
   const scenarios = await getScenarios();
 
@@ -25,6 +43,16 @@ async function main() {
         body: sanitizeObject(scenario.response_body)
       }
     };
+
+    const dynamicFields: string[] = [];
+
+    if (containsField(scenario.response_body, "orderId")) {
+      dynamicFields.push("orderId");
+    }
+
+    if (dynamicFields.length > 0) {
+      outputScenario.dynamicFields = dynamicFields;
+    }
 
     if (
       scenario.method === "GET" &&

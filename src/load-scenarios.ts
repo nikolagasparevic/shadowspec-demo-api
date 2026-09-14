@@ -1,4 +1,5 @@
 import fs from "fs";
+
 import type { ReplaySetup } from "./setup-replay";
 
 export type ShadowSpecScenario = {
@@ -14,6 +15,8 @@ export type ShadowSpecScenario = {
     status: number;
     body: unknown;
   };
+
+  dynamicFields?: string[];
 
   setup?: ReplaySetup;
 };

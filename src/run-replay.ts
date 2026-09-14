@@ -42,7 +42,8 @@ async function main() {
       scenario.expected.body,
       result.body,
       scenario.expected.status,
-      result.status
+        result.status,
+       scenario.dynamicFields ?? []
     );
 
     console.log("Comparison:");

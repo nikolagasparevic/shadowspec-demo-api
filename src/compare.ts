@@ -1,5 +1,3 @@
-import { orderContract } from "./contract";
-
 function sortObjectKeys(obj: any): any {
   if (Array.isArray(obj)) {
     return obj.map(sortObjectKeys);
@@ -17,16 +15,24 @@ function sortObjectKeys(obj: any): any {
   return obj;
 }
 
-function removeDynamicFields(value: any): any {
+function removeDynamicFields(
+  value: any,
+  dynamicFields: string[]
+): any {
   if (Array.isArray(value)) {
-    return value.map(removeDynamicFields);
+    return value.map((item) =>
+      removeDynamicFields(item, dynamicFields)
+    );
   }
 
   if (value !== null && typeof value === "object") {
     return Object.keys(value)
-      .filter((key) => !orderContract.dynamicFields.includes(key))
+      .filter((key) => !dynamicFields.includes(key))
       .reduce((result, key) => {
-        result[key] = removeDynamicFields(value[key]);
+        result[key] = removeDynamicFields(
+          value[key],
+          dynamicFields
+        );
         return result;
       }, {} as any);
   }
@@ -34,8 +40,14 @@ function removeDynamicFields(value: any): any {
   return value;
 }
 
-export function normalizeResponse(body: any) {
-  const withoutDynamicFields = removeDynamicFields(body);
+export function normalizeResponse(
+  body: any,
+  dynamicFields: string[] = []
+) {
+  const withoutDynamicFields = removeDynamicFields(
+    body,
+    dynamicFields
+  );
 
   return sortObjectKeys(withoutDynamicFields);
 }
@@ -44,10 +56,18 @@ export function compareResponses(
   original: any,
   replay: any,
   originalStatus: number,
-  replayStatus: number
+  replayStatus: number,
+  dynamicFields: string[] = []
 ) {
-  const normalizedOriginal = normalizeResponse(original);
-  const normalizedReplay = normalizeResponse(replay);
+  const normalizedOriginal = normalizeResponse(
+    original,
+    dynamicFields
+  );
+
+  const normalizedReplay = normalizeResponse(
+    replay,
+    dynamicFields
+  );
 
   const differences: {
     field: string;

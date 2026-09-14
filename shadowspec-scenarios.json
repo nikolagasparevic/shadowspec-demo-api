@@ -18,7 +18,10 @@
         "productId": 321,
         "customerId": 888
       }
-    }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
   },
   {
     "id": 2,
@@ -39,7 +42,10 @@
         "productId": 555,
         "customerId": 999
       }
-    }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
   },
   {
     "id": 3,
@@ -60,7 +66,10 @@
         "productId": 777,
         "customerId": 1111
       }
-    }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
   },
   {
     "id": 4,
@@ -81,7 +90,10 @@
         "productId": 777,
         "customerId": 1111
       }
-    }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
   },
   {
     "id": 5,
@@ -102,7 +114,10 @@
         "productId": 5678,
         "customerId": 1234
       }
-    }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
   },
   {
     "id": 6,
@@ -188,6 +203,9 @@
         }
       ]
     },
+    "dynamicFields": [
+      "orderId"
+    ],
     "setup": {
       "orders": [
         {
