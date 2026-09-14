@@ -60,12 +60,12 @@ jobs:
       - name: Run ShadowSpec
         env:
           DB_NAME: shadowspec_replay
-          SHADOWSPEC_TARGET_URL: http://localhost:3000
+          SHADOWSPEC_TARGET_URL: http://127.0.0.1:3000
         run: |
           DB_NAME=shadowspec_replay npx tsx src/server.ts > target.log 2>&1 &
 
           for i in {1..30}; do
-            if curl -s http://localhost:3000/ > /dev/null; then
+            if curl -s http://127.0.0.1:3000/ > /dev/null; then
               echo "Target API is ready."
               break
             fi
@@ -74,7 +74,7 @@ jobs:
             sleep 2
           done
 
-          if ! curl -s http://localhost:3000/ > /dev/null; then
+          if ! curl -s http://127.0.0.1:3000/ > /dev/null; then
             echo "Target API did not become ready."
             cat target.log
             exit 1
