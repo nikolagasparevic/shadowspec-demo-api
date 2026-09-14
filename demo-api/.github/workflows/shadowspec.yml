@@ -1,0 +1,47 @@
+name: ShadowSpec
+
+on:
+  pull_request:
+
+jobs:
+  shadowspec:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Start PostgreSQL
+        run: docker compose up -d
+
+      - name: Wait for PostgreSQL
+        run: |
+          until docker exec $(docker ps -q --filter ancestor=postgres:17) pg_isready -U shadowspec; do
+            sleep 1
+          done
+
+      - name: Create database schema
+        run: |
+          docker exec -i $(docker ps -q --filter ancestor=postgres:17) \
+            psql -U shadowspec -d shadowspec < db/schema.sql
+
+      - name: Seed ShadowSpec scenarios
+        run: |
+          docker exec -i $(docker ps -q --filter ancestor=postgres:17) \
+            psql -U shadowspec -d shadowspec < db/seed.sql
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Start replay server
+        run: |
+          DB_NAME=shadowspec npx tsx src/replay-server.ts > replay.log 2>&1 &
+          sleep 3
+
+      - name: Run ShadowSpec
+        run: npx tsx src/run-replay.ts

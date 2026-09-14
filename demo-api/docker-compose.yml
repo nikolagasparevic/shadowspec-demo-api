@@ -1,0 +1,9 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: shadowspec
+      POSTGRES_PASSWORD: shadowspec123
+      POSTGRES_DB: shadowspec
+    ports:
+      - "5432:5432"

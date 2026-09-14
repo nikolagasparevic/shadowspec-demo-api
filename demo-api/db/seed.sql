@@ -1,0 +1,31 @@
+INSERT INTO api_requests
+  (method, path, request_body, response_status, response_body)
+VALUES
+(
+  'POST',
+  '/orders',
+  '{"customerId":888,"productId":321,"quantity":4}',
+  201,
+  '{"orderId":1,"customerId":888,"productId":321,"quantity":4,"status":"created"}'
+),
+(
+  'POST',
+  '/orders',
+  '{"customerId":999,"productId":555,"quantity":1}',
+  201,
+  '{"orderId":2,"customerId":999,"productId":555,"quantity":1,"status":"created"}'
+),
+(
+  'POST',
+  '/orders',
+  '{"customerId":1111,"productId":777,"quantity":2}',
+  201,
+  '{"orderId":3,"customerId":1111,"productId":777,"quantity":2,"status":"created"}'
+),
+(
+  'POST',
+  '/orders',
+  '{"customerId":1111,"productId":777,"quantity":5}',
+  201,
+  '{"orderId":4,"customerId":1111,"productId":777,"quantity":5,"status":"created"}'
+);
