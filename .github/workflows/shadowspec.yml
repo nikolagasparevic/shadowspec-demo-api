@@ -24,18 +24,28 @@ jobs:
 
       - name: Wait for PostgreSQL
         run: |
-          until docker exec $(docker ps -q --filter ancestor=postgres:17) pg_isready -U shadowspec; do
-            sleep 1
+          for i in {1..30}; do
+            if docker exec shadowspec-postgres pg_isready -U shadowspec -d shadowspec; then
+              echo "PostgreSQL is ready."
+              exit 0
+            fi
+
+            echo "Waiting for PostgreSQL..."
+            sleep 2
           done
+
+          echo "PostgreSQL did not become ready."
+          docker logs shadowspec-postgres
+          exit 1
 
       - name: Create database schema
         run: |
-          docker exec -i $(docker ps -q --filter ancestor=postgres:17) \
+          docker exec -i shadowspec-postgres \
             psql -U shadowspec -d shadowspec < db/schema.sql
 
       - name: Seed ShadowSpec scenarios
         run: |
-          docker exec -i $(docker ps -q --filter ancestor=postgres:17) \
+          docker exec -i shadowspec-postgres \
             psql -U shadowspec -d shadowspec < db/seed.sql
 
       - name: Install dependencies
