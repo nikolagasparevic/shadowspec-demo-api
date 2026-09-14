@@ -57,26 +57,27 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Start target API
+      - name: Run ShadowSpec
+        env:
+          DB_NAME: shadowspec_replay
+          SHADOWSPEC_TARGET_URL: http://localhost:3000
         run: |
           DB_NAME=shadowspec_replay npx tsx src/server.ts > target.log 2>&1 &
 
           for i in {1..30}; do
             if curl -s http://localhost:3000/ > /dev/null; then
               echo "Target API is ready."
-              exit 0
+              break
             fi
 
             echo "Waiting for target API..."
             sleep 2
           done
 
-          echo "Target API did not become ready."
-          cat target.log
-          exit 1
+          if ! curl -s http://localhost:3000/ > /dev/null; then
+            echo "Target API did not become ready."
+            cat target.log
+            exit 1
+          fi
 
-      - name: Run ShadowSpec
-        env:
-          DB_NAME: shadowspec_replay
-          SHADOWSPEC_TARGET_URL: http://localhost:3000
-        run: npx tsx src/run-replay.ts
+          npx tsx src/run-replay.ts
