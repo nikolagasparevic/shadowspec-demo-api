@@ -38,23 +38,25 @@ jobs:
           docker compose logs postgres
           exit 1
 
-      - name: Create database schema
+      - name: Create production database schema
         run: |
           docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec < db/schema.sql
 
-      - name: Seed ShadowSpec scenarios
+      - name: Create replay database schema
         run: |
           docker compose exec -T postgres \
-            psql -U shadowspec -d shadowspec < db/seed.sql
+            psql -U shadowspec -d shadowspec_replay < db/schema.sql
 
       - name: Install dependencies
         run: npm install
 
       - name: Start replay server
         run: |
-          DB_NAME=shadowspec npx tsx src/replay-server.ts > replay.log 2>&1 &
+          DB_NAME=shadowspec_replay npx tsx src/replay-server.ts > replay.log 2>&1 &
           sleep 3
 
       - name: Run ShadowSpec
+        env:
+          DB_NAME: shadowspec_replay
         run: npx tsx src/run-replay.ts

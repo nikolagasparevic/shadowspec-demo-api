@@ -1,4 +1,4 @@
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     id SERIAL PRIMARY KEY,
     customer_id INTEGER NOT NULL,
     product_id INTEGER NOT NULL,
@@ -6,7 +6,7 @@ CREATE TABLE orders (
     status VARCHAR(50) NOT NULL
 );
 
-CREATE TABLE api_requests (
+CREATE TABLE IF NOT EXISTS api_requests (
     id SERIAL PRIMARY KEY,
     method VARCHAR(10) NOT NULL,
     path VARCHAR(255) NOT NULL,
