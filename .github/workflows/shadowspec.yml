@@ -25,7 +25,7 @@ jobs:
       - name: Wait for PostgreSQL
         run: |
           for i in {1..30}; do
-            if docker exec shadowspec-postgres pg_isready -U shadowspec -d shadowspec; then
+            if docker compose exec -T postgres pg_isready -U shadowspec -d shadowspec; then
               echo "PostgreSQL is ready."
               exit 0
             fi
@@ -35,17 +35,17 @@ jobs:
           done
 
           echo "PostgreSQL did not become ready."
-          docker logs shadowspec-postgres
+          docker compose logs postgres
           exit 1
 
       - name: Create database schema
         run: |
-          docker exec -i shadowspec-postgres \
+          docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec < db/schema.sql
 
       - name: Seed ShadowSpec scenarios
         run: |
-          docker exec -i shadowspec-postgres \
+          docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec < db/seed.sql
 
       - name: Install dependencies
