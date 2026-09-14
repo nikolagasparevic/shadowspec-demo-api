@@ -59,10 +59,11 @@ jobs:
 
       - name: Start replay server
         run: |
-          DB_NAME=shadowspec_replay npx tsx src/replay-server.ts > replay.log 2>&1 &
+          DB_NAME=shadowspec_replay npx tsx src/server.ts > replay.log 2>&1 &
           sleep 3
 
       - name: Run ShadowSpec
         env:
           DB_NAME: shadowspec_replay
+          SHADOWSPEC_TARGET_URL: http://localhost:3001
         run: npx tsx src/run-replay.ts
