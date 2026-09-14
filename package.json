@@ -1,14 +1,23 @@
 {
-  "name": "demo-api",
-  "version": "1.0.0",
-  "description": "",
+  "name": "shadowspec",
+  "version": "0.1.0",
+  "description": "Behavioral regression testing from production traffic",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "tsx src/server.ts",
+    "export": "tsx src/export-scenarios.ts",
+    "replay": "tsx src/run-replay.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "api",
+    "testing",
+    "regression",
+    "behavioral-testing",
+    "github",
+    "ai"
+  ],
+  "author": "Nikola Gasparevic",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@fastify/postgres": "^6.1.0",
