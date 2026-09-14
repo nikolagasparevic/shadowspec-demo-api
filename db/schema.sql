@@ -13,5 +13,6 @@ CREATE TABLE api_requests (
     request_body JSONB,
     response_status INTEGER NOT NULL,
     response_body JSONB,
+    active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
