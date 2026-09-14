@@ -42,7 +42,7 @@ jobs:
         run: |
           docker compose exec -T postgres \
             psql -U shadowspec -d postgres \
-            -c "SELECT 'CREATE DATABASE shadowspec_replay' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'shadowspec_replay')\gexec"
+            -c "CREATE DATABASE shadowspec_replay;"
 
       - name: Create production database schema
         run: |
