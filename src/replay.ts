@@ -6,7 +6,6 @@ export async function replayRequest(
   const targetUrl =
     process.env.SHADOWSPEC_TARGET_URL || "http://localhost:3001";
 
-  console.log("ShadowSpec target:", `${targetUrl}${path}`);
 
   const options: RequestInit = {
     method,
