@@ -3,6 +3,56 @@ import { getScenarioGroups } from "./scenario";
 import { sanitizeObject } from "./sanitize";
 import { detectDynamicFields } from "./dynamic-fields";
 
+function getSanitizedFields(
+  original: any,
+  sanitized: any
+): string[] {
+  const fields = new Set<string>();
+
+  if (Array.isArray(original)) {
+    if (!Array.isArray(sanitized)) {
+      return [];
+    }
+
+    for (let i = 0; i < original.length; i++) {
+      const nestedFields = getSanitizedFields(
+        original[i],
+        sanitized[i]
+      );
+
+      for (const field of nestedFields) {
+        fields.add(field);
+      }
+    }
+
+    return Array.from(fields);
+  }
+
+  if (
+    original !== null &&
+    typeof original === "object" &&
+    sanitized !== null &&
+    typeof sanitized === "object"
+  ) {
+    for (const key of Object.keys(original)) {
+      if (!Object.prototype.hasOwnProperty.call(sanitized, key)) {
+        fields.add(key);
+        continue;
+      }
+
+      const nestedFields = getSanitizedFields(
+        original[key],
+        sanitized[key]
+      );
+
+      for (const field of nestedFields) {
+        fields.add(field);
+      }
+    }
+  }
+
+  return Array.from(fields);
+}
 
 async function main() {
   const scenarioGroups = await getScenarioGroups();
@@ -15,23 +65,43 @@ async function main() {
   const output = scenarioGroups.map((group, index) => {
     const baseline = group.responses[0];
 
+    const sanitizedRequestBody = sanitizeObject(
+      group.requestBody
+    );
+
+    const sanitizedResponseBody = sanitizeObject(
+      baseline.body
+    );
+
     const outputScenario: any = {
       id: index + 1,
 
       request: {
         method: group.method,
         path: group.path,
-        body: sanitizeObject(group.requestBody)
+        body: sanitizedRequestBody
       },
 
       expected: {
         status: baseline.status,
-        body: sanitizeObject(baseline.body)
+        body: sanitizedResponseBody
       }
     };
 
-    const dynamicFields = detectDynamicFields(
+    const detectedDynamicFields = detectDynamicFields(
       group.responses.map((response) => response.body)
+    );
+
+    const sanitizedDynamicFields = getSanitizedFields(
+      baseline.body,
+      sanitizedResponseBody
+    );
+
+    const dynamicFields = Array.from(
+      new Set([
+        ...detectedDynamicFields,
+        ...sanitizedDynamicFields
+      ])
     );
 
     if (dynamicFields.length > 0) {

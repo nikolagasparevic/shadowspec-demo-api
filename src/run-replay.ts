@@ -11,6 +11,8 @@ async function main() {
 
   const failures: {
     scenario: number;
+    method: string;
+    path: string;
     differences: any[];
   }[] = [];
 
@@ -56,6 +58,8 @@ async function main() {
 
       failures.push({
         scenario: index + 1,
+          method: scenario.request.method,
+          path: scenario.request.path,
         differences: comparison.differences
       });
     }
@@ -72,13 +76,18 @@ async function main() {
     console.log("\nFailures:");
 
     for (const failure of failures) {
-      console.log(`\n❌ Scenario ${failure.scenario}`);
+     console.log(`\n❌ Scenario ${failure.scenario}`);
+      console.log(`   ${failure.method} ${failure.path}`);
 
-      for (const difference of failure.differences) {
-        console.log(
-          `   ${difference.field}: ${JSON.stringify(difference.expected)} → ${JSON.stringify(difference.actual)}`
-        );
-      }
+   for (const difference of failure.differences) {
+  console.log(`\n   ${difference.field}:`);
+  console.log(
+    `   Expected: ${JSON.stringify(difference.expected)}`
+  );
+  console.log(
+    `   Actual:   ${JSON.stringify(difference.actual)}`
+  );
+}
     }
   }
 

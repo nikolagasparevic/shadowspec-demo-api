@@ -26,15 +26,20 @@ function removeDynamicFields(
   }
 
   if (value !== null && typeof value === "object") {
-    return Object.keys(value)
-      .filter((key) => !dynamicFields.includes(key))
-      .reduce((result, key) => {
-        result[key] = removeDynamicFields(
-          value[key],
-          dynamicFields
-        );
-        return result;
-      }, {} as any);
+    const result: any = {};
+
+    for (const [key, childValue] of Object.entries(value)) {
+      if (dynamicFields.includes(key)) {
+        continue;
+      }
+
+      result[key] = removeDynamicFields(
+        childValue,
+        dynamicFields
+      );
+    }
+
+    return result;
   }
 
   return value;

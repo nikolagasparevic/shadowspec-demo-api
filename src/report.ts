@@ -5,6 +5,8 @@ export type ShadowSpecReport = {
   failedScenarios: number;
   failures: {
     scenario: number;
+    method: string;
+    path: string;
     differences: {
       field: string;
       expected: any;

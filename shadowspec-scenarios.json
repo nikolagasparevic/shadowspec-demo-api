@@ -172,7 +172,37 @@
           "customerId": 888
         },
         {
-          "status": "pending",
+          "status": "created",
+          "quantity": 4,
+          "productId": 321,
+          "customerId": 888
+        },
+        {
+          "status": "created",
+          "quantity": 1,
+          "productId": 555,
+          "customerId": 999
+        },
+        {
+          "status": "created",
+          "quantity": 2,
+          "productId": 777,
+          "customerId": 1111
+        },
+        {
+          "status": "created",
+          "quantity": 5,
+          "productId": 777,
+          "customerId": 1111
+        },
+        {
+          "status": "created",
+          "quantity": 3,
+          "productId": 5678,
+          "customerId": 1234
+        },
+        {
+          "status": "created",
           "quantity": 4,
           "productId": 321,
           "customerId": 888
@@ -254,7 +284,37 @@
           "customerId": 888,
           "productId": 321,
           "quantity": 4,
-          "status": "pending"
+          "status": "created"
+        },
+        {
+          "customerId": 999,
+          "productId": 555,
+          "quantity": 1,
+          "status": "created"
+        },
+        {
+          "customerId": 1111,
+          "productId": 777,
+          "quantity": 2,
+          "status": "created"
+        },
+        {
+          "customerId": 1111,
+          "productId": 777,
+          "quantity": 5,
+          "status": "created"
+        },
+        {
+          "customerId": 1234,
+          "productId": 5678,
+          "quantity": 3,
+          "status": "created"
+        },
+        {
+          "customerId": 888,
+          "productId": 321,
+          "quantity": 4,
+          "status": "created"
         },
         {
           "customerId": 999,
