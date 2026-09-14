@@ -1,5 +1,5 @@
 import fs from "fs";
-import { getScenarios } from "./scenario";
+import { loadScenarios } from "./load-scenarios";
 import { replayRequest } from "./replay";
 import { compareResponses } from "./compare";
 import { createReport } from "./report";
@@ -13,7 +13,7 @@ async function main() {
     differences: any[];
   }[] = [];
 
-  const scenarios = await getScenarios();
+  const scenarios = loadScenarios();
 
   if (scenarios.length === 0) {
     console.log("No scenarios found.");
@@ -29,16 +29,16 @@ async function main() {
     const result = await replayRequest(
       scenario.method,
       scenario.path,
-      scenario.request_body
+      scenario.requestBody
     );
 
     console.log("Replay:");
     console.log(result);
 
     const comparison = compareResponses(
-      scenario.response_body,
+      scenario.expectedBody,
       result.body,
-      scenario.response_status,
+      scenario.expectedStatus,
       result.status
     );
 
