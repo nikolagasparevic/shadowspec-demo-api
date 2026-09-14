@@ -1,4 +1,5 @@
 import fs from "fs";
+import type { ReplaySetup } from "./setup-replay";
 
 export type ShadowSpecScenario = {
   id: number;
@@ -13,6 +14,8 @@ export type ShadowSpecScenario = {
     status: number;
     body: unknown;
   };
+
+  setup?: ReplaySetup;
 };
 
 export function loadScenarios(): ShadowSpecScenario[] {

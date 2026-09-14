@@ -3,13 +3,21 @@ export async function replayRequest(
   path: string,
   requestBody: unknown
 ) {
-  const response = await fetch(`http://localhost:3001${path}`, {
+  const options: RequestInit = {
     method,
     headers: {
       "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
+    }
+  };
+
+  if (method !== "GET" && method !== "HEAD" && requestBody !== null) {
+    options.body = JSON.stringify(requestBody);
+  }
+
+  const response = await fetch(
+    `http://localhost:3001${path}`,
+    options
+  );
 
   const responseBody = await response.json();
 

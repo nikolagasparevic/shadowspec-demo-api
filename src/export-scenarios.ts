@@ -10,20 +10,39 @@ async function main() {
     return;
   }
 
-  const output = scenarios.map((scenario, index) => ({
-    id: index + 1,
+  const output = scenarios.map((scenario, index) => {
+    const outputScenario: any = {
+      id: index + 1,
 
-    request: {
-      method: scenario.method,
-      path: scenario.path,
-      body: sanitizeObject(scenario.request_body)
-    },
+      request: {
+        method: scenario.method,
+        path: scenario.path,
+        body: sanitizeObject(scenario.request_body)
+      },
 
-    expected: {
-      status: scenario.response_status,
-      body: sanitizeObject(scenario.response_body)
+      expected: {
+        status: scenario.response_status,
+        body: sanitizeObject(scenario.response_body)
+      }
+    };
+
+    if (
+      scenario.method === "GET" &&
+      scenario.path === "/orders" &&
+      Array.isArray(scenario.response_body)
+    ) {
+      outputScenario.setup = {
+        orders: scenario.response_body.map((order: any) => ({
+          customerId: order.customerId,
+          productId: order.productId,
+          quantity: order.quantity,
+          status: order.status
+        }))
+      };
     }
-  }));
+
+    return outputScenario;
+  });
 
   fs.writeFileSync(
     "shadowspec-scenarios.json",

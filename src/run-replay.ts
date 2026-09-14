@@ -3,6 +3,7 @@ import { loadScenarios } from "./load-scenarios";
 import { replayRequest } from "./replay";
 import { compareResponses } from "./compare";
 import { createReport } from "./report";
+import { applyReplaySetup } from "./setup-replay";
 
 async function main() {
   let passed = 0;
@@ -25,6 +26,8 @@ async function main() {
 
     console.log("Original:");
     console.log(scenario);
+
+    await applyReplaySetup(scenario.setup);
 
     const result = await replayRequest(
       scenario.request.method,

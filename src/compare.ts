@@ -17,14 +17,27 @@ function sortObjectKeys(obj: any): any {
   return obj;
 }
 
-export function normalizeResponse(body: any) {
-  const normalized = { ...body };
-
-  for (const field of orderContract.dynamicFields) {
-    delete normalized[field];
+function removeDynamicFields(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map(removeDynamicFields);
   }
 
-  return sortObjectKeys(normalized);
+  if (value !== null && typeof value === "object") {
+    return Object.keys(value)
+      .filter((key) => !orderContract.dynamicFields.includes(key))
+      .reduce((result, key) => {
+        result[key] = removeDynamicFields(value[key]);
+        return result;
+      }, {} as any);
+  }
+
+  return value;
+}
+
+export function normalizeResponse(body: any) {
+  const withoutDynamicFields = removeDynamicFields(body);
+
+  return sortObjectKeys(withoutDynamicFields);
 }
 
 export function compareResponses(
@@ -42,22 +55,15 @@ export function compareResponses(
     actual: any;
   }[] = [];
 
-  const allKeys = new Set([
-    ...Object.keys(normalizedOriginal),
-    ...Object.keys(normalizedReplay)
-  ]);
-
-  for (const key of allKeys) {
-    if (
-      JSON.stringify(normalizedOriginal[key]) !==
-      JSON.stringify(normalizedReplay[key])
-    ) {
-      differences.push({
-        field: key,
-        expected: normalizedOriginal[key],
-        actual: normalizedReplay[key]
-      });
-    }
+  if (
+    JSON.stringify(normalizedOriginal) !==
+    JSON.stringify(normalizedReplay)
+  ) {
+    differences.push({
+      field: "body",
+      expected: normalizedOriginal,
+      actual: normalizedReplay
+    });
   }
 
   if (originalStatus !== replayStatus) {

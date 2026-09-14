@@ -30,4 +30,22 @@ app.post("/orders", async (request, reply) => {
   });
 });
 
+app.get("/orders", async (request, reply) => {
+  const result = await pool.query(
+    `SELECT id, customer_id, product_id, quantity, status
+     FROM orders
+     ORDER BY id ASC`
+  );
+
+  const responseBody = result.rows.map((order) => ({
+    orderId: order.id,
+    customerId: order.customer_id,
+    productId: order.product_id,
+    quantity: order.quantity,
+    status: order.status
+  }));
+
+  return reply.code(200).send(responseBody);
+});
+
 app.listen({ port: 3001, host: "0.0.0.0" });
