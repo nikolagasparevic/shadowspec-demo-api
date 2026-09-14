@@ -3,6 +3,11 @@ export async function replayRequest(
   path: string,
   requestBody: unknown
 ) {
+  const targetUrl =
+    process.env.SHADOWSPEC_TARGET_URL || "http://localhost:3001";
+
+  console.log("ShadowSpec target:", `${targetUrl}${path}`);
+
   const options: RequestInit = {
     method,
     headers: {
@@ -10,12 +15,16 @@ export async function replayRequest(
     }
   };
 
-  if (method !== "GET" && method !== "HEAD" && requestBody !== null) {
+  if (
+    method !== "GET" &&
+    method !== "HEAD" &&
+    requestBody !== null
+  ) {
     options.body = JSON.stringify(requestBody);
   }
 
   const response = await fetch(
-    `http://localhost:3001${path}`,
+    `${targetUrl}${path}`,
     options
   );
 
