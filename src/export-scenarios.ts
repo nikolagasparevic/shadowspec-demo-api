@@ -169,6 +169,48 @@ async function main() {
     }
   }
 
+  const sharedOrders = new Map<
+    string,
+    {
+      customerId: number;
+      productId: number;
+      quantity: number;
+      status: string;
+    }
+  >();
+
+  for (const group of dynamicPathGroups.values()) {
+    if (
+      group.method !== "GET" ||
+      group.path !== "/orders" ||
+      !Array.isArray(group.responses[0]?.body)
+    ) {
+      continue;
+    }
+
+    for (const response of group.responses) {
+      if (!Array.isArray(response.body)) {
+        continue;
+      }
+
+      for (const order of response.body) {
+        const key = [
+          order.customerId,
+          order.productId,
+          order.quantity,
+          order.status
+        ].join(":");
+
+        sharedOrders.set(key, {
+          customerId: order.customerId,
+          productId: order.productId,
+          quantity: order.quantity,
+          status: order.status
+        });
+      }
+    }
+  }
+
   const output = Array.from(
     dynamicPathGroups.values()
   ).map((group, index) => {
@@ -239,21 +281,32 @@ async function main() {
         dynamicFields;
     }
 
+    const hasQueryParams =
+      Object.keys(group.queryParams).length > 0;
+
     if (
       group.method === "GET" &&
       group.path === "/orders" &&
       Array.isArray(baseline.body)
     ) {
-      outputScenario.setup = {
-        orders: baseline.body.map(
-          (order: any) => ({
-            customerId: order.customerId,
-            productId: order.productId,
-            quantity: order.quantity,
-            status: order.status
-          })
-        )
-      };
+      if (hasQueryParams) {
+        outputScenario.setup = {
+          orders: Array.from(
+            sharedOrders.values()
+          )
+        };
+      } else {
+        outputScenario.setup = {
+          orders: baseline.body.map(
+            (order: any) => ({
+              customerId: order.customerId,
+              productId: order.productId,
+              quantity: order.quantity,
+              status: order.status
+            })
+          )
+        };
+      }
     }
 
     if (

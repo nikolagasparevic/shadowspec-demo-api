@@ -30,6 +30,12 @@
           "productId": 5678,
           "quantity": 3,
           "status": "created"
+        },
+        {
+          "customerId": 4444,
+          "productId": 5555,
+          "quantity": 5,
+          "status": "created"
         }
       ]
     }
@@ -60,6 +66,12 @@
     ],
     "setup": {
       "orders": [
+        {
+          "customerId": 1234,
+          "productId": 5678,
+          "quantity": 3,
+          "status": "created"
+        },
         {
           "customerId": 4444,
           "productId": 5555,
