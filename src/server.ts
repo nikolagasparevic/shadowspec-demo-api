@@ -81,15 +81,15 @@ app.get("/orders", async (request, reply) => {
 
   let result;
 
-  if (customerId !== undefined) {
-    result = await pool.query(
-      `SELECT id, customer_id, product_id, quantity, status
-       FROM orders
-       WHERE customer_id = $1
-       ORDER BY id ASC`,
-      [customerId]
-    );
-  } else {
+if (customerId !== undefined) {
+  // INTENTIONAL REGRESSION:
+  // customerId is received but ignored.
+  result = await pool.query(
+    `SELECT id, customer_id, product_id, quantity, status
+     FROM orders
+     ORDER BY id ASC`
+  );
+} else {
     result = await pool.query(
       `SELECT id, customer_id, product_id, quantity, status
        FROM orders
