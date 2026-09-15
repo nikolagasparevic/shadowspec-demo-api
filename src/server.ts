@@ -23,7 +23,7 @@ app.post("/orders", async (request, reply) => {
     `INSERT INTO orders (customer_id, product_id, quantity, status)
      VALUES ($1, $2, $3, $4)
      RETURNING id, customer_id, product_id, quantity, status`,
-    [body.customerId, body.productId, body.quantity, "created"]
+    [body.customerId, body.productId, body.quantity, "pending"]
   );
 
   const order = result.rows[0];
