@@ -38,8 +38,36 @@ app.post("/orders", async (request, reply) => {
     status: order.status
   };
 
-
   return reply.code(201).send(responseBody);
+});
+
+app.get("/orders/:id", async (request, reply) => {
+  const params = request.params as {
+    id: string;
+  };
+
+  const result = await pool.query(
+    `SELECT id, customer_id, product_id, quantity, status
+     FROM orders
+     WHERE id = $1`,
+    [Number(params.id)]
+  );
+
+  if (result.rows.length === 0) {
+    return reply.code(404).send({
+      error: "Order not found"
+    });
+  }
+
+  const order = result.rows[0];
+
+  return reply.code(200).send({
+    orderId: order.id,
+    customerId: order.customer_id,
+    productId: order.product_id,
+    quantity: order.quantity,
+    status: order.status
+  });
 });
 
 app.get("/orders", async (request, reply) => {
@@ -56,7 +84,6 @@ app.get("/orders", async (request, reply) => {
     quantity: order.quantity,
     status: order.status
   }));
-
 
   return reply.code(200).send(responseBody);
 });

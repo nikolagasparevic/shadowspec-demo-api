@@ -356,5 +356,104 @@
         "message": "ShadowSpec Demo API is alive"
       }
     }
+  },
+  {
+    "id": 8,
+    "request": {
+      "method": "GET",
+      "path": "/orders/:id",
+      "body": null,
+      "pathParams": {
+        "id": "1"
+      }
+    },
+    "expected": {
+      "status": 404,
+      "body": {
+        "error": "Order not found"
+      }
+    }
+  },
+  {
+    "id": 9,
+    "request": {
+      "method": "GET",
+      "path": "/orders/:id",
+      "body": null,
+      "pathParams": {
+        "id": "1"
+      }
+    },
+    "expected": {
+      "status": 200,
+      "body": {
+        "status": "created",
+        "quantity": 3,
+        "productId": 5678,
+        "customerId": 1234
+      }
+    },
+    "dynamicFields": [
+      "orderId"
+    ],
+    "setup": {
+      "orders": [
+        {
+          "id": 1,
+          "customerId": 1234,
+          "productId": 5678,
+          "quantity": 3,
+          "status": "created"
+        }
+      ]
+    }
+  },
+  {
+    "id": 10,
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 2,
+        "productId": 3333,
+        "customerId": 2222
+      }
+    },
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 2,
+        "productId": 3333,
+        "customerId": 2222
+      }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
+  },
+  {
+    "id": 11,
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 5,
+        "productId": 5555,
+        "customerId": 4444
+      }
+    },
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 5,
+        "productId": 5555,
+        "customerId": 4444
+      }
+    },
+    "dynamicFields": [
+      "orderId"
+    ]
   }
 ]

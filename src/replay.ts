@@ -1,11 +1,23 @@
 export async function replayRequest(
   method: string,
   path: string,
-  requestBody: unknown
+  requestBody: unknown,
+  pathParams: Record<string, string> = {}
 ) {
   const targetUrl =
-    process.env.SHADOWSPEC_TARGET_URL || "http://localhost:3001";
+    process.env.SHADOWSPEC_TARGET_URL ||
+    "http://localhost:3001";
 
+  let resolvedPath = path;
+
+  for (const [key, value] of Object.entries(
+    pathParams
+  )) {
+    resolvedPath = resolvedPath.replace(
+      `:${key}`,
+      encodeURIComponent(value)
+    );
+  }
 
   const options: RequestInit = {
     method,
@@ -23,7 +35,7 @@ export async function replayRequest(
   }
 
   const response = await fetch(
-    `${targetUrl}${path}`,
+    `${targetUrl}${resolvedPath}`,
     options
   );
 

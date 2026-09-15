@@ -2,6 +2,7 @@ import { pool } from "./db";
 
 export type ReplaySetup = {
   orders?: {
+    id?: number;
     customerId: number;
     productId: number;
     quantity: number;
@@ -10,10 +11,14 @@ export type ReplaySetup = {
 };
 
 export async function resetReplayDatabase() {
-  await pool.query("TRUNCATE TABLE orders RESTART IDENTITY");
+  await pool.query(
+    "TRUNCATE TABLE orders RESTART IDENTITY"
+  );
 }
 
-export async function applyReplaySetup(setup?: ReplaySetup) {
+export async function applyReplaySetup(
+  setup?: ReplaySetup
+) {
   await resetReplayDatabase();
 
   if (!setup) {
@@ -22,6 +27,23 @@ export async function applyReplaySetup(setup?: ReplaySetup) {
 
   if (setup.orders) {
     for (const order of setup.orders) {
+      if (order.id !== undefined) {
+        await pool.query(
+          `INSERT INTO orders
+            (id, customer_id, product_id, quantity, status)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            order.id,
+            order.customerId,
+            order.productId,
+            order.quantity,
+            order.status
+          ]
+        );
+
+        continue;
+      }
+
       await pool.query(
         `INSERT INTO orders
           (customer_id, product_id, quantity, status)

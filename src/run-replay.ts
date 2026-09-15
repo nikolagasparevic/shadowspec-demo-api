@@ -34,7 +34,8 @@ async function main() {
     const result = await replayRequest(
       scenario.request.method,
       scenario.request.path,
-      scenario.request.body
+      scenario.request.body,
+      scenario.request.pathParams ?? {}
     );
 
     console.log("Replay:");
@@ -44,8 +45,8 @@ async function main() {
       scenario.expected.body,
       result.body,
       scenario.expected.status,
-        result.status,
-       scenario.dynamicFields ?? []
+      result.status,
+      scenario.dynamicFields ?? []
     );
 
     console.log("Comparison:");
@@ -58,8 +59,8 @@ async function main() {
 
       failures.push({
         scenario: index + 1,
-          method: scenario.request.method,
-          path: scenario.request.path,
+        method: scenario.request.method,
+        path: scenario.request.path,
         differences: comparison.differences
       });
     }
@@ -76,18 +77,18 @@ async function main() {
     console.log("\nFailures:");
 
     for (const failure of failures) {
-     console.log(`\n❌ Scenario ${failure.scenario}`);
+      console.log(`\n❌ Scenario ${failure.scenario}`);
       console.log(`   ${failure.method} ${failure.path}`);
 
-   for (const difference of failure.differences) {
-  console.log(`\n   ${difference.field}:`);
-  console.log(
-    `   Expected: ${JSON.stringify(difference.expected)}`
-  );
-  console.log(
-    `   Actual:   ${JSON.stringify(difference.actual)}`
-  );
-}
+      for (const difference of failure.differences) {
+        console.log(`\n   ${difference.field}:`);
+        console.log(
+          `   Expected: ${JSON.stringify(difference.expected)}`
+        );
+        console.log(
+          `   Actual:   ${JSON.stringify(difference.actual)}`
+        );
+      }
     }
   }
 
@@ -109,7 +110,9 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 
   if (failed > 0) {
-    throw new Error(`ShadowSpec detected ${failed} regression(s).`);
+    throw new Error(
+      `ShadowSpec detected ${failed} regression(s).`
+    );
   }
 }
 

@@ -1,5 +1,4 @@
 import fs from "fs";
-
 import type { ReplaySetup } from "./setup-replay";
 
 export type ShadowSpecScenario = {
@@ -9,6 +8,7 @@ export type ShadowSpecScenario = {
     method: string;
     path: string;
     body: unknown;
+    pathParams?: Record<string, string>;
   };
 
   expected: {
