@@ -1,10 +1,12 @@
 import Fastify from "fastify";
 import { pool } from "./db";
-import { recordApiRequest } from "./recorder";
+import { registerShadowSpecAgent } from "./agent";
 
 const app = Fastify({
   logger: true
 });
+
+registerShadowSpecAgent(app);
 
 app.get("/", async () => {
   return {
@@ -36,13 +38,6 @@ app.post("/orders", async (request, reply) => {
     status: order.status
   };
 
-  await recordApiRequest(
-    request.method,
-    request.url,
-    body,
-    201,
-    responseBody
-  );
 
   return reply.code(201).send(responseBody);
 });
@@ -62,13 +57,6 @@ app.get("/orders", async (request, reply) => {
     status: order.status
   }));
 
-  await recordApiRequest(
-    request.method,
-    request.url,
-    null,
-    200,
-    responseBody
-  );
 
   return reply.code(200).send(responseBody);
 });
