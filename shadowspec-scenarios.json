@@ -342,5 +342,19 @@
         }
       ]
     }
+  },
+  {
+    "id": 7,
+    "request": {
+      "method": "GET",
+      "path": "/",
+      "body": null
+    },
+    "expected": {
+      "status": 200,
+      "body": {
+        "message": "ShadowSpec Demo API is alive"
+      }
+    }
   }
 ]
