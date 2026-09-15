@@ -206,11 +206,11 @@ jobs:
 
               body += `\`${JSON.stringify(regression.expected)}\` → \`${JSON.stringify(regression.actual)}\`\n\n`;
 
-              if (regression.scenarios.length === 1) {
-                body += `Scenario: **#${regression.scenarios[0]}**\n\n`;
-              } else {
-                body += `Scenarios: **${regression.scenarios.map((scenario) => `#${scenario}`).join(", ")}**\n\n`;
-              }
+             if (regression.scenarios.length === 1) {
+             body += `Scenario ID: **${regression.scenarios[0]}**\n\n`;
+             } else {
+                 body += `Scenario IDs: **${regression.scenarios.join(", ")}**\n\n`;
+             }
             }
 
             body += "---\n";
