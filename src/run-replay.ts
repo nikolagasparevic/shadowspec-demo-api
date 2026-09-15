@@ -35,7 +35,8 @@ async function main() {
       scenario.request.method,
       scenario.request.path,
       scenario.request.body,
-      scenario.request.pathParams ?? {}
+      scenario.request.pathParams ?? {},
+      scenario.request.queryParams ?? {}
     );
 
     console.log("Replay:");

@@ -64,8 +64,11 @@ function normalizeDynamicPath(
 ): {
   path: string;
   pathParams: Record<string, string>;
+  queryParams: Record<string, string>;
 } {
-  const segments = path.split("/");
+  const [rawPath, rawQuery] = path.split("?");
+
+  const segments = rawPath.split("/");
 
   const pathParams: Record<string, string> = {};
 
@@ -90,9 +93,22 @@ function normalizeDynamicPath(
     }
   );
 
+  const queryParams: Record<string, string> = {};
+
+  if (rawQuery) {
+    const searchParams = new URLSearchParams(
+      rawQuery
+    );
+
+    for (const [key, value] of searchParams.entries()) {
+      queryParams[key] = value;
+    }
+  }
+
   return {
     path: normalizedSegments.join("/"),
-    pathParams
+    pathParams,
+    queryParams
   };
 }
 
@@ -110,6 +126,7 @@ async function main() {
       method: string;
       path: string;
       pathParams: Record<string, string>;
+      queryParams: Record<string, string>;
       requestBody: any;
       responseStatus: number;
       responses: {
@@ -128,6 +145,7 @@ async function main() {
       const key = [
         group.method,
         normalized.path,
+        JSON.stringify(normalized.queryParams),
         JSON.stringify(group.requestBody),
         response.status
       ].join(":");
@@ -143,6 +161,7 @@ async function main() {
         method: group.method,
         path: normalized.path,
         pathParams: normalized.pathParams,
+        queryParams: normalized.queryParams,
         requestBody: group.requestBody,
         responseStatus: response.status,
         responses: [response]
@@ -184,6 +203,13 @@ async function main() {
     if (hasDynamicPath) {
       outputScenario.request.pathParams =
         group.pathParams;
+    }
+
+    if (
+      Object.keys(group.queryParams).length > 0
+    ) {
+      outputScenario.request.queryParams =
+        group.queryParams;
     }
 
     const detectedDynamicFields =

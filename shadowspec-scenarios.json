@@ -455,5 +455,40 @@
     "dynamicFields": [
       "orderId"
     ]
+  },
+  {
+    "id": 12,
+    "request": {
+      "method": "GET",
+      "path": "/orders",
+      "body": null,
+      "queryParams": {
+        "customerId": "1234"
+      }
+    },
+    "expected": {
+      "status": 200,
+      "body": [
+        {
+          "status": "created",
+          "quantity": 5,
+          "productId": 5555,
+          "customerId": 4444
+        }
+      ]
+    },
+    "dynamicFields": [
+      "orderId"
+    ],
+    "setup": {
+      "orders": [
+        {
+          "customerId": 4444,
+          "productId": 5555,
+          "quantity": 5,
+          "status": "created"
+        }
+      ]
+    }
   }
 ]

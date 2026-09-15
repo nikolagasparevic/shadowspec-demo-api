@@ -9,6 +9,7 @@ export type ShadowSpecScenario = {
     path: string;
     body: unknown;
     pathParams?: Record<string, string>;
+    queryParams?: Record<string, string>;
   };
 
   expected: {

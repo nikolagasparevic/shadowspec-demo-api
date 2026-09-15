@@ -2,7 +2,8 @@ export async function replayRequest(
   method: string,
   path: string,
   requestBody: unknown,
-  pathParams: Record<string, string> = {}
+  pathParams: Record<string, string> = {},
+  queryParams: Record<string, string> = {}
 ) {
   const targetUrl =
     process.env.SHADOWSPEC_TARGET_URL ||
@@ -17,6 +18,20 @@ export async function replayRequest(
       `:${key}`,
       encodeURIComponent(value)
     );
+  }
+
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(
+    queryParams
+  )) {
+    searchParams.set(key, value);
+  }
+
+  const queryString = searchParams.toString();
+
+  if (queryString) {
+    resolvedPath += `?${queryString}`;
   }
 
   const options: RequestInit = {
