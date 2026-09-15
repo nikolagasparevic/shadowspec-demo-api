@@ -7,6 +7,7 @@ export type ShadowSpecReport = {
     scenario: number;
     method: string;
     path: string;
+    queryParams: Record<string, string>;
     differences: {
       field: string;
       expected: any;

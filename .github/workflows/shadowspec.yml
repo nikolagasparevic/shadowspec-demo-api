@@ -119,6 +119,17 @@ jobs:
               fs.readFileSync("shadowspec-report.json", "utf8")
             );
 
+            function formatRequest(failure) {
+              const queryParams = failure.queryParams || {};
+              const queryString = new URLSearchParams(
+                queryParams
+              ).toString();
+
+              return queryString
+                ? `${failure.method} ${failure.path}?${queryString}`
+                : `${failure.method} ${failure.path}`;
+            }
+
             if (report.passed) {
               const body = [
                 "🟢 **ShadowSpec passed**",
@@ -144,9 +155,12 @@ jobs:
 
             for (const failure of report.failures) {
               for (const difference of failure.differences) {
+                const queryParams = failure.queryParams || {};
+
                 const key = [
                   failure.method,
                   failure.path,
+                  JSON.stringify(queryParams),
                   difference.field,
                   JSON.stringify(difference.expected),
                   JSON.stringify(difference.actual)
@@ -160,6 +174,7 @@ jobs:
                   regressionGroups.set(key, {
                     method: failure.method,
                     path: failure.path,
+                    queryParams,
                     field: difference.field,
                     expected: difference.expected,
                     actual: difference.actual,
@@ -171,13 +186,31 @@ jobs:
 
             const totalRegressions = report.failedScenarios;
 
-            let body = `🔴 **${totalRegressions} behavioral regression${totalRegressions === 1 ? "" : "s"} detected**\n\n`;
+            let body =
+              `🔴 **${totalRegressions} behavioral regression${totalRegressions === 1 ? "" : "s"} detected**\n\n`;
 
             for (const regression of regressionGroups.values()) {
-              body += `### \`${regression.method} ${regression.path}\`\n\n`;
+              const queryParams = regression.queryParams || {};
+
+              const queryString = new URLSearchParams(
+                queryParams
+              ).toString();
+
+              const requestPath = queryString
+                ? `${regression.path}?${queryString}`
+                : regression.path;
+
+              body += `### \`${regression.method} ${requestPath}\`\n\n`;
+
               body += `**${regression.field} changed**\n\n`;
+
               body += `\`${JSON.stringify(regression.expected)}\` → \`${JSON.stringify(regression.actual)}\`\n\n`;
-              body += `Affected scenarios: **${regression.scenarios.length}**\n\n`;
+
+              if (regression.scenarios.length === 1) {
+                body += `Scenario: **#${regression.scenarios[0]}**\n\n`;
+              } else {
+                body += `Scenarios: **${regression.scenarios.map((scenario) => `#${scenario}`).join(", ")}**\n\n`;
+              }
             }
 
             body += "---\n";

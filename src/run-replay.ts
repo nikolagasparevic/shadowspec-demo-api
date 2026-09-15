@@ -13,6 +13,7 @@ async function main() {
     scenario: number;
     method: string;
     path: string;
+    queryParams: Record<string, string>;
     differences: any[];
   }[] = [];
 
@@ -62,6 +63,8 @@ async function main() {
         scenario: index + 1,
         method: scenario.request.method,
         path: scenario.request.path,
+        queryParams:
+          scenario.request.queryParams ?? {},
         differences: comparison.differences
       });
     }
@@ -78,8 +81,18 @@ async function main() {
     console.log("\nFailures:");
 
     for (const failure of failures) {
+      const queryString = new URLSearchParams(
+        failure.queryParams
+      ).toString();
+
+      const fullPath = queryString
+        ? `${failure.path}?${queryString}`
+        : failure.path;
+
       console.log(`\n❌ Scenario ${failure.scenario}`);
-      console.log(`   ${failure.method} ${failure.path}`);
+      console.log(
+        `   ${failure.method} ${fullPath}`
+      );
 
       for (const difference of failure.differences) {
         console.log(`\n   ${difference.field}:`);
