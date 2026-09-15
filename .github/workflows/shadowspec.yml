@@ -44,6 +44,24 @@ jobs:
 
       - name: Create replay database
         run: |
+          for i in {1..10}; do
+            if docker compose exec -T postgres \
+              psql -U shadowspec -d postgres \
+              -c "SELECT 1;" > /dev/null 2>&1; then
+              echo "PostgreSQL accepts SQL connections."
+              break
+            fi
+
+            if [ "$i" -eq 10 ]; then
+              echo "PostgreSQL did not become ready for SQL connections."
+              docker compose logs postgres
+              exit 1
+            fi
+
+            echo "PostgreSQL is not ready for queries yet..."
+            sleep 2
+          done
+
           docker compose exec -T postgres \
             psql -U shadowspec -d postgres \
             -c "CREATE DATABASE shadowspec_replay;"
