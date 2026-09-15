@@ -8,6 +8,10 @@ on:
 
 jobs:
   shadowspec:
+    permissions:
+      contents: read
+      pull-requests: write
+
     runs-on: ubuntu-latest
 
     steps:
@@ -81,6 +85,55 @@ jobs:
           fi
 
           npx tsx src/run-replay.ts
+
+      - name: Comment ShadowSpec result on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+
+            if (!fs.existsSync("shadowspec-report.json")) {
+              return;
+            }
+
+            const report = JSON.parse(
+              fs.readFileSync("shadowspec-report.json", "utf8")
+            );
+
+            const icon = report.passed ? "🟢" : "🔴";
+            const title = report.passed
+              ? "ShadowSpec passed"
+              : "ShadowSpec detected behavioral regressions";
+
+            let body = `${icon} **${title}**\n\n`;
+            body += `- Scenarios: **${report.scenarios}**\n`;
+            body += `- Passed: **${report.passedScenarios}**\n`;
+            body += `- Failed: **${report.failedScenarios}**\n`;
+
+            if (report.failures.length > 0) {
+              body += "\n### Failures\n\n";
+
+              for (const failure of report.failures) {
+                body += `- **Scenario ${failure.scenario}** — \`${failure.method} ${failure.path}\`\n`;
+
+                for (const difference of failure.differences) {
+                  body += `  - **${difference.field}**\n`;
+                  body += `    - Expected: \`${JSON.stringify(difference.expected)}\`\n`;
+                  body += `    - Actual: \`${JSON.stringify(difference.actual)}\`\n`;
+                }
+              }
+            }
+
+            body += "\n---\n";
+            body += "_ShadowSpec behavioral regression check_";
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
 
       - name: Upload ShadowSpec report
         if: always()
