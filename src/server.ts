@@ -71,11 +71,31 @@ app.get("/orders/:id", async (request, reply) => {
 });
 
 app.get("/orders", async (request, reply) => {
-  const result = await pool.query(
-    `SELECT id, customer_id, product_id, quantity, status
-     FROM orders
-     ORDER BY id ASC`
-  );
+  const query = request.query as {
+    customerId?: string;
+  };
+
+  const customerId = query.customerId
+    ? Number(query.customerId)
+    : undefined;
+
+  let result;
+
+  if (customerId !== undefined) {
+    result = await pool.query(
+      `SELECT id, customer_id, product_id, quantity, status
+       FROM orders
+       WHERE customer_id = $1
+       ORDER BY id ASC`,
+      [customerId]
+    );
+  } else {
+    result = await pool.query(
+      `SELECT id, customer_id, product_id, quantity, status
+       FROM orders
+       ORDER BY id ASC`
+    );
+  }
 
   const responseBody = result.rows.map((order) => ({
     orderId: order.id,

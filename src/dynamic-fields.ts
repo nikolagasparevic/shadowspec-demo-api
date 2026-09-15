@@ -19,10 +19,14 @@ function getFieldValues(
         typeof childValue === "object" &&
         !Array.isArray(childValue)
       ) {
-        const nested = getFieldValues(childValue, path);
+        const nested = getFieldValues(
+          childValue,
+          path
+        );
 
         for (const [nestedPath, values] of nested) {
-          const existing = result.get(nestedPath) ?? [];
+          const existing =
+            result.get(nestedPath) ?? [];
 
           result.set(nestedPath, [
             ...existing,
@@ -45,64 +49,6 @@ function getFieldValues(
   return result;
 }
 
-function getArrayDynamicFields(
-  responses: any[]
-): string[] {
-  const arrays = responses.filter(
-    (response) => Array.isArray(response)
-  );
-
-  if (arrays.length < 2) {
-    return [];
-  }
-
-  const dynamicFields = new Set<string>();
-
-  for (const array of arrays) {
-    if (array.length === 0) {
-      continue;
-    }
-
-    const fieldValues = new Map<string, any[]>();
-
-    for (const item of array) {
-      if (
-        item === null ||
-        typeof item !== "object" ||
-        Array.isArray(item)
-      ) {
-        continue;
-      }
-
-      const fields = getFieldValues(item);
-
-      for (const [field, values] of fields) {
-        const existing = fieldValues.get(field) ?? [];
-
-        fieldValues.set(field, [
-          ...existing,
-          ...values
-        ]);
-      }
-    }
-
-    for (const [field, values] of fieldValues) {
-      const uniqueValues = new Set(
-        values.map((value) => JSON.stringify(value))
-      );
-
-      if (
-        values.length === array.length &&
-        uniqueValues.size === values.length
-      ) {
-        dynamicFields.add(field);
-      }
-    }
-  }
-
-  return Array.from(dynamicFields);
-}
-
 export function detectDynamicFields(
   responses: any[]
 ): string[] {
@@ -115,7 +61,7 @@ export function detectDynamicFields(
   );
 
   if (hasArrayResponses) {
-    return getArrayDynamicFields(responses);
+    return [];
   }
 
   const fieldValues = new Map<string, any[]>();
@@ -124,7 +70,8 @@ export function detectDynamicFields(
     const fields = getFieldValues(response);
 
     for (const [field, values] of fields) {
-      const existing = fieldValues.get(field) ?? [];
+      const existing =
+        fieldValues.get(field) ?? [];
 
       fieldValues.set(field, [
         ...existing,
@@ -137,7 +84,9 @@ export function detectDynamicFields(
 
   for (const [field, values] of fieldValues) {
     const uniqueValues = new Set(
-      values.map((value) => JSON.stringify(value))
+      values.map((value) =>
+        JSON.stringify(value)
+      )
     );
 
     if (uniqueValues.size > 1) {
