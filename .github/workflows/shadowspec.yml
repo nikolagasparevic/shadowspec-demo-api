@@ -119,31 +119,68 @@ jobs:
               fs.readFileSync("shadowspec-report.json", "utf8")
             );
 
-            const icon = report.passed ? "🟢" : "🔴";
-            const title = report.passed
-              ? "ShadowSpec passed"
-              : "ShadowSpec detected behavioral regressions";
+            if (report.passed) {
+              const body = [
+                "🟢 **ShadowSpec passed**",
+                "",
+                `- Scenarios checked: **${report.scenarios}**`,
+                `- No behavioral regressions detected.`,
+                "",
+                "---",
+                "_ShadowSpec behavioral regression check_"
+              ].join("\n");
 
-            let body = `${icon} **${title}**\n\n`;
-            body += `- Scenarios: **${report.scenarios}**\n`;
-            body += `- Passed: **${report.passedScenarios}**\n`;
-            body += `- Failed: **${report.failedScenarios}**\n`;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
 
-            if (report.failures.length > 0) {
-              body += "\n### Failures\n\n";
+              return;
+            }
 
-              for (const failure of report.failures) {
-                body += `- **Scenario ${failure.scenario}** — \`${failure.method} ${failure.path}\`\n`;
+            const regressionGroups = new Map();
 
-                for (const difference of failure.differences) {
-                  body += `  - **${difference.field}**\n`;
-                  body += `    - Expected: \`${JSON.stringify(difference.expected)}\`\n`;
-                  body += `    - Actual: \`${JSON.stringify(difference.actual)}\`\n`;
+            for (const failure of report.failures) {
+              for (const difference of failure.differences) {
+                const key = [
+                  failure.method,
+                  failure.path,
+                  difference.field,
+                  JSON.stringify(difference.expected),
+                  JSON.stringify(difference.actual)
+                ].join("|");
+
+                const existing = regressionGroups.get(key);
+
+                if (existing) {
+                  existing.scenarios.push(failure.scenario);
+                } else {
+                  regressionGroups.set(key, {
+                    method: failure.method,
+                    path: failure.path,
+                    field: difference.field,
+                    expected: difference.expected,
+                    actual: difference.actual,
+                    scenarios: [failure.scenario]
+                  });
                 }
               }
             }
 
-            body += "\n---\n";
+            const totalRegressions = report.failedScenarios;
+
+            let body = `🔴 **${totalRegressions} behavioral regression${totalRegressions === 1 ? "" : "s"} detected**\n\n`;
+
+            for (const regression of regressionGroups.values()) {
+              body += `### \`${regression.method} ${regression.path}\`\n\n`;
+              body += `**${regression.field} changed**\n\n`;
+              body += `\`${JSON.stringify(regression.expected)}\` → \`${JSON.stringify(regression.actual)}\`\n\n`;
+              body += `Affected scenarios: **${regression.scenarios.length}**\n\n`;
+            }
+
+            body += "---\n";
             body += "_ShadowSpec behavioral regression check_";
 
             await github.rest.issues.createComment({
