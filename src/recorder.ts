@@ -5,6 +5,8 @@ export async function recordApiRequest(
   method: string,
   path: string,
   requestBody: unknown,
+  pathParams: Record<string, string>,
+  queryParams: Record<string, string>,
   responseStatus: number,
   responseBody: unknown
 ) {
@@ -18,12 +20,22 @@ export async function recordApiRequest(
 
     const requestResult = await client.query(
       `INSERT INTO api_requests
-        (method, path, request_body, response_status, response_body)
-       VALUES ($1, $2, $3, $4, $5)
+        (
+          method,
+          path,
+          path_params,
+          query_params,
+          request_body,
+          response_status,
+          response_body
+        )
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
       [
         method,
         path,
+        JSON.stringify(pathParams),
+        JSON.stringify(queryParams),
         JSON.stringify(requestBody),
         responseStatus,
         JSON.stringify(responseBody)

@@ -14,11 +14,16 @@ function getSanitizedFields(
       return [];
     }
 
-    for (let i = 0; i < original.length; i++) {
-      const nestedFields = getSanitizedFields(
-        original[i],
-        sanitized[i]
-      );
+    for (
+      let i = 0;
+      i < original.length;
+      i++
+    ) {
+      const nestedFields =
+        getSanitizedFields(
+          original[i],
+          sanitized[i]
+        );
 
       for (const field of nestedFields) {
         fields.add(field);
@@ -45,10 +50,11 @@ function getSanitizedFields(
         continue;
       }
 
-      const nestedFields = getSanitizedFields(
-        original[key],
-        sanitized[key]
-      );
+      const nestedFields =
+        getSanitizedFields(
+          original[key],
+          sanitized[key]
+        );
 
       for (const field of nestedFields) {
         fields.add(field);
@@ -59,61 +65,9 @@ function getSanitizedFields(
   return Array.from(fields);
 }
 
-function normalizeDynamicPath(
-  path: string
-): {
-  path: string;
-  pathParams: Record<string, string>;
-  queryParams: Record<string, string>;
-} {
-  const [rawPath, rawQuery] = path.split("?");
-
-  const segments = rawPath.split("/");
-
-  const pathParams: Record<string, string> = {};
-
-  let dynamicIndex = 0;
-
-  const normalizedSegments = segments.map(
-    (segment) => {
-      if (/^\d+$/.test(segment)) {
-        dynamicIndex++;
-
-        const paramName =
-          dynamicIndex === 1
-            ? "id"
-            : `param${dynamicIndex}`;
-
-        pathParams[paramName] = segment;
-
-        return `:${paramName}`;
-      }
-
-      return segment;
-    }
-  );
-
-  const queryParams: Record<string, string> = {};
-
-  if (rawQuery) {
-    const searchParams = new URLSearchParams(
-      rawQuery
-    );
-
-    for (const [key, value] of searchParams.entries()) {
-      queryParams[key] = value;
-    }
-  }
-
-  return {
-    path: normalizedSegments.join("/"),
-    pathParams,
-    queryParams
-  };
-}
-
 async function main() {
-  const scenarioGroups = await getScenarioGroups();
+  const scenarioGroups =
+    await getScenarioGroups();
 
   if (scenarioGroups.length === 0) {
     console.log("No scenarios found.");
@@ -138,20 +92,18 @@ async function main() {
   >();
 
   for (const group of scenarioGroups) {
-    const normalized = normalizeDynamicPath(
-      group.path
-    );
-
     for (const response of group.responses) {
       const key = [
         group.method,
-        normalized.path,
-        JSON.stringify(normalized.queryParams),
+        group.path,
+        JSON.stringify(group.pathParams),
+        JSON.stringify(group.queryParams),
         JSON.stringify(group.requestBody),
         response.status
       ].join(":");
 
-      const existing = dynamicPathGroups.get(key);
+      const existing =
+        dynamicPathGroups.get(key);
 
       if (existing) {
         existing.responses.push(response);
@@ -160,9 +112,9 @@ async function main() {
 
       dynamicPathGroups.set(key, {
         method: group.method,
-        path: normalized.path,
-        pathParams: normalized.pathParams,
-        queryParams: normalized.queryParams,
+        path: group.path,
+        pathParams: group.pathParams,
+        queryParams: group.queryParams,
         requestBody: group.requestBody,
         responseStatus: response.status,
         responses: [response]
@@ -175,9 +127,10 @@ async function main() {
   ).map((group, index) => {
     const baseline = group.responses[0];
 
-    const sanitizedRequestBody = sanitizeObject(
-      group.requestBody
-    );
+    const sanitizedRequestBody =
+      sanitizeObject(
+        group.requestBody
+      );
 
     const sanitizedResponseBody =
       sanitizeObject(baseline.body);
@@ -197,10 +150,9 @@ async function main() {
       }
     };
 
-    const hasDynamicPath =
-      Object.keys(group.pathParams).length > 0;
-
-    if (hasDynamicPath) {
+    if (
+      Object.keys(group.pathParams).length > 0
+    ) {
       outputScenario.request.pathParams =
         group.pathParams;
     }
@@ -213,13 +165,11 @@ async function main() {
     }
 
     const detectedDynamicFields =
-      hasDynamicPath
-        ? []
-        : detectDynamicFields(
-            group.responses.map(
-              (response) => response.body
-            )
-          );
+      detectDynamicFields(
+        group.responses.map(
+          (response) => response.body
+        )
+      );
 
     const sanitizedDynamicFields =
       getSanitizedFields(
@@ -241,7 +191,9 @@ async function main() {
 
     if (baseline.snapshot) {
       outputScenario.setup =
-        sanitizeObject(baseline.snapshot);
+        sanitizeObject(
+          baseline.snapshot
+        );
     }
 
     return outputScenario;

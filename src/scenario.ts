@@ -3,6 +3,8 @@ import { pool } from "./db";
 export type ScenarioGroup = {
   method: string;
   path: string;
+  pathParams: Record<string, string>;
+  queryParams: Record<string, string>;
   requestBody: any;
   responses: {
     body: any;
@@ -11,11 +13,15 @@ export type ScenarioGroup = {
   }[];
 };
 
-export async function getScenarioGroups(): Promise<ScenarioGroup[]> {
+export async function getScenarioGroups(): Promise<
+  ScenarioGroup[]
+> {
   const result = await pool.query(
     `SELECT
        r.method,
        r.path,
+       r.path_params,
+       r.query_params,
        r.request_body,
        r.response_body,
        r.response_status,
@@ -27,12 +33,25 @@ export async function getScenarioGroups(): Promise<ScenarioGroup[]> {
      ORDER BY r.id ASC`
   );
 
-  const groups = new Map<string, ScenarioGroup>();
+  const groups = new Map<
+    string,
+    ScenarioGroup
+  >();
 
   for (const row of result.rows) {
-    const key = `${row.method}:${row.path}:${JSON.stringify(
-      row.request_body
-    )}`;
+    const pathParams =
+      row.path_params ?? {};
+
+    const queryParams =
+      row.query_params ?? {};
+
+    const key = [
+      row.method,
+      row.path,
+      JSON.stringify(pathParams),
+      JSON.stringify(queryParams),
+      JSON.stringify(row.request_body)
+    ].join(":");
 
     const existing = groups.get(key);
 
@@ -49,6 +68,8 @@ export async function getScenarioGroups(): Promise<ScenarioGroup[]> {
     groups.set(key, {
       method: row.method,
       path: row.path,
+      pathParams,
+      queryParams,
       requestBody: row.request_body,
       responses: [
         {

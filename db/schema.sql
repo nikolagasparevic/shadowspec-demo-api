@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS api_requests (
     id SERIAL PRIMARY KEY,
     method VARCHAR(10) NOT NULL,
     path VARCHAR(255) NOT NULL,
+    path_params JSONB,
+    query_params JSONB,
     request_body JSONB,
     response_status INTEGER NOT NULL,
     response_body JSONB,

@@ -26,8 +26,16 @@ export async function registerShadowSpecAgent(
 
       await recordApiRequest(
         request.method,
-        request.url,
+        request.url.split("?")[0],
         request.body ?? null,
+        request.params as Record<
+          string,
+          string
+        >,
+        request.query as Record<
+          string,
+          string
+        >,
         reply.statusCode,
         responseBody
       );
