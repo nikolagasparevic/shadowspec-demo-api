@@ -49,23 +49,22 @@
   {
     "id": 2,
     "request": {
-      "method": "GET",
+      "method": "POST",
       "path": "/orders",
-      "body": null,
-      "queryParams": {
-        "customerId": "4444"
+      "body": {
+        "quantity": 1,
+        "productId": 8888,
+        "customerId": 9999
       }
     },
     "expected": {
-      "status": 200,
-      "body": [
-        {
-          "status": "created",
-          "quantity": 5,
-          "productId": 5555,
-          "customerId": 4444
-        }
-      ]
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 1,
+        "productId": 8888,
+        "customerId": 9999
+      }
     },
     "dynamicFields": [
       "orderId"

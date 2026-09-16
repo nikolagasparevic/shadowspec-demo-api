@@ -1,5 +1,5 @@
 import { pool } from "./db";
-import { captureDatabaseSnapshot } from "./db-snapshot";
+import type { DatabaseSnapshot } from "./db-snapshot";
 
 export async function recordApiRequest(
   method: string,
@@ -8,11 +8,9 @@ export async function recordApiRequest(
   pathParams: Record<string, string>,
   queryParams: Record<string, string>,
   responseStatus: number,
-  responseBody: unknown
+  responseBody: unknown,
+  snapshot: DatabaseSnapshot
 ) {
-  const snapshot =
-    await captureDatabaseSnapshot();
-
   const client = await pool.connect();
 
   try {

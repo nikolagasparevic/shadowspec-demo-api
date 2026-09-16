@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { recordApiRequest } from "./recorder";
+import { captureDatabaseSnapshot } from "./db-snapshot";
 
 export async function registerShadowSpecAgent(
   app: FastifyInstance
@@ -10,6 +11,17 @@ export async function registerShadowSpecAgent(
   if (!enabled) {
     return;
   }
+
+  app.addHook(
+    "preHandler",
+    async (request) => {
+      const snapshot =
+        await captureDatabaseSnapshot();
+
+      (request as any).shadowSpecSnapshot =
+        snapshot;
+    }
+  );
 
   app.addHook(
     "onSend",
@@ -37,7 +49,9 @@ export async function registerShadowSpecAgent(
           string
         >,
         reply.statusCode,
-        responseBody
+        responseBody,
+        (request as any)
+          .shadowSpecSnapshot
       );
 
       return payload;
