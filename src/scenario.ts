@@ -7,20 +7,24 @@ export type ScenarioGroup = {
   responses: {
     body: any;
     status: number;
+    snapshot?: any;
   }[];
 };
 
 export async function getScenarioGroups(): Promise<ScenarioGroup[]> {
   const result = await pool.query(
     `SELECT
-       method,
-       path,
-       request_body,
-       response_body,
-       response_status
-     FROM api_requests
-     WHERE active = TRUE
-     ORDER BY id ASC`
+       r.method,
+       r.path,
+       r.request_body,
+       r.response_body,
+       r.response_status,
+       s.snapshot
+     FROM api_requests r
+     LEFT JOIN api_request_snapshots s
+       ON s.api_request_id = r.id
+     WHERE r.active = TRUE
+     ORDER BY r.id ASC`
   );
 
   const groups = new Map<string, ScenarioGroup>();
@@ -35,7 +39,8 @@ export async function getScenarioGroups(): Promise<ScenarioGroup[]> {
     if (existing) {
       existing.responses.push({
         body: row.response_body,
-        status: row.response_status
+        status: row.response_status,
+        snapshot: row.snapshot
       });
 
       continue;
@@ -48,7 +53,8 @@ export async function getScenarioGroups(): Promise<ScenarioGroup[]> {
       responses: [
         {
           body: row.response_body,
-          status: row.response_status
+          status: row.response_status,
+          snapshot: row.snapshot
         }
       ]
     });

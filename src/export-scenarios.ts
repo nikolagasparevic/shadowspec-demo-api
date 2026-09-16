@@ -132,6 +132,7 @@ async function main() {
       responses: {
         body: any;
         status: number;
+        snapshot?: any;
       }[];
     }
   >();
@@ -169,48 +170,6 @@ async function main() {
     }
   }
 
-  const sharedOrders = new Map<
-    string,
-    {
-      customerId: number;
-      productId: number;
-      quantity: number;
-      status: string;
-    }
-  >();
-
-  for (const group of dynamicPathGroups.values()) {
-    if (
-      group.method !== "GET" ||
-      group.path !== "/orders" ||
-      !Array.isArray(group.responses[0]?.body)
-    ) {
-      continue;
-    }
-
-    for (const response of group.responses) {
-      if (!Array.isArray(response.body)) {
-        continue;
-      }
-
-      for (const order of response.body) {
-        const key = [
-          order.customerId,
-          order.productId,
-          order.quantity,
-          order.status
-        ].join(":");
-
-        sharedOrders.set(key, {
-          customerId: order.customerId,
-          productId: order.productId,
-          quantity: order.quantity,
-          status: order.status
-        });
-      }
-    }
-  }
-
   const output = Array.from(
     dynamicPathGroups.values()
   ).map((group, index) => {
@@ -220,9 +179,8 @@ async function main() {
       group.requestBody
     );
 
-    const sanitizedResponseBody = sanitizeObject(
-      baseline.body
-    );
+    const sanitizedResponseBody =
+      sanitizeObject(baseline.body);
 
     const outputScenario: any = {
       id: index + 1,
@@ -281,54 +239,9 @@ async function main() {
         dynamicFields;
     }
 
-    const hasQueryParams =
-      Object.keys(group.queryParams).length > 0;
-
-    if (
-      group.method === "GET" &&
-      group.path === "/orders" &&
-      Array.isArray(baseline.body)
-    ) {
-      if (hasQueryParams) {
-        outputScenario.setup = {
-          orders: Array.from(
-            sharedOrders.values()
-          )
-        };
-      } else {
-        outputScenario.setup = {
-          orders: baseline.body.map(
-            (order: any) => ({
-              customerId: order.customerId,
-              productId: order.productId,
-              quantity: order.quantity,
-              status: order.status
-            })
-          )
-        };
-      }
-    }
-
-    if (
-      group.method === "GET" &&
-      group.path === "/orders/:id" &&
-      group.responseStatus === 200 &&
-      baseline.body !== null &&
-      typeof baseline.body === "object" &&
-      !Array.isArray(baseline.body) &&
-      group.pathParams.id
-    ) {
-      outputScenario.setup = {
-        orders: [
-          {
-            id: Number(group.pathParams.id),
-            customerId: baseline.body.customerId,
-            productId: baseline.body.productId,
-            quantity: baseline.body.quantity,
-            status: baseline.body.status
-          }
-        ]
-      };
+    if (baseline.snapshot) {
+      outputScenario.setup =
+        sanitizeObject(baseline.snapshot);
     }
 
     return outputScenario;

@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { captureDatabaseSnapshot } from "./db-snapshot";
 
 export async function recordApiRequest(
   method: string,
@@ -7,16 +8,46 @@ export async function recordApiRequest(
   responseStatus: number,
   responseBody: unknown
 ) {
-  await pool.query(
-    `INSERT INTO api_requests
-      (method, path, request_body, response_status, response_body)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [
-      method,
-      path,
-      JSON.stringify(requestBody),
-      responseStatus,
-      JSON.stringify(responseBody)
-    ]
-  );
+  const snapshot =
+    await captureDatabaseSnapshot();
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const requestResult = await client.query(
+      `INSERT INTO api_requests
+        (method, path, request_body, response_status, response_body)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [
+        method,
+        path,
+        JSON.stringify(requestBody),
+        responseStatus,
+        JSON.stringify(responseBody)
+      ]
+    );
+
+    const apiRequestId =
+      requestResult.rows[0].id;
+
+    await client.query(
+      `INSERT INTO api_request_snapshots
+        (api_request_id, snapshot)
+       VALUES ($1, $2)`,
+      [
+        apiRequestId,
+        JSON.stringify(snapshot)
+      ]
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

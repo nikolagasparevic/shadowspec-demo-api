@@ -24,20 +24,26 @@
       "orderId"
     ],
     "setup": {
-      "orders": [
-        {
-          "customerId": 1234,
-          "productId": 5678,
-          "quantity": 3,
-          "status": "created"
-        },
-        {
-          "customerId": 4444,
-          "productId": 5555,
-          "quantity": 5,
-          "status": "created"
+      "tables": {
+        "orders": {
+          "rows": [
+            {
+              "id": 1,
+              "status": "created",
+              "quantity": 3,
+              "product_id": 5678,
+              "customer_id": 1234
+            },
+            {
+              "id": 2,
+              "status": "created",
+              "quantity": 5,
+              "product_id": 5555,
+              "customer_id": 4444
+            }
+          ]
         }
-      ]
+      }
     }
   },
   {
@@ -65,20 +71,26 @@
       "orderId"
     ],
     "setup": {
-      "orders": [
-        {
-          "customerId": 1234,
-          "productId": 5678,
-          "quantity": 3,
-          "status": "created"
-        },
-        {
-          "customerId": 4444,
-          "productId": 5555,
-          "quantity": 5,
-          "status": "created"
+      "tables": {
+        "orders": {
+          "rows": [
+            {
+              "id": 1,
+              "status": "created",
+              "quantity": 3,
+              "product_id": 5678,
+              "customer_id": 1234
+            },
+            {
+              "id": 2,
+              "status": "created",
+              "quantity": 5,
+              "product_id": 5555,
+              "customer_id": 4444
+            }
+          ]
         }
-      ]
+      }
     }
   }
 ]
