@@ -1,0 +1,295 @@
+import {
+  describe,
+  expect,
+  it
+} from "vitest";
+
+import {
+  buildScenarios,
+  findBestBaselineResponse
+} from "../src/export-scenarios";
+
+describe("findBestBaselineResponse", () => {
+  it("prefers a response with a valid snapshot", () => {
+    const responses = [
+      {
+        body: {
+          orderId: 1
+        },
+        status: 201,
+        snapshot: {
+          tables: {}
+        }
+      },
+      {
+        body: {
+          orderId: 2
+        },
+        status: 201,
+        snapshot: {
+          tables: {
+            orders: {
+              rows: [
+                {
+                  id: 1
+                }
+              ]
+            }
+          }
+        }
+      }
+    ];
+
+    expect(
+      findBestBaselineResponse(
+        responses
+      )
+    ).toBe(responses[1]);
+  });
+
+  it("falls back to the first response when no valid snapshot exists", () => {
+    const responses = [
+      {
+        body: {
+          orderId: 1
+        },
+        status: 201,
+        snapshot: {
+          tables: {}
+        }
+      },
+      {
+        body: {
+          orderId: 2
+        },
+        status: 201,
+        snapshot: {
+          tables: {}
+        }
+      }
+    ];
+
+    expect(
+      findBestBaselineResponse(
+        responses
+      )
+    ).toBe(responses[0]);
+  });
+
+  it("prefers the first valid snapshot", () => {
+    const responses = [
+      {
+        body: {
+          orderId: 1
+        },
+        status: 201
+      },
+      {
+        body: {
+          orderId: 2
+        },
+        status: 201,
+        snapshot: {
+          tables: {
+            orders: {
+              rows: []
+            }
+          }
+        }
+      },
+      {
+        body: {
+          orderId: 3
+        },
+        status: 201,
+        snapshot: {
+          tables: {
+            orders: {
+              rows: [
+                {
+                  id: 3
+                }
+              ]
+            }
+          }
+        }
+      }
+    ];
+
+    expect(
+      findBestBaselineResponse(
+        responses
+      )
+    ).toBe(responses[1]);
+  });
+});
+
+describe("buildScenarios", () => {
+  it("builds a scenario from a grouped response", () => {
+    const result = buildScenarios([
+      {
+        method: "GET",
+        path: "/orders/1",
+        pathParams: {
+          id: "1"
+        },
+        queryParams: {},
+        requestBody: null,
+        responses: [
+          {
+            body: {
+              orderId: 123,
+              status: "created"
+            },
+            status: 200
+          }
+        ]
+      }
+    ]);
+
+    expect(result).toEqual([
+      {
+        id: 1,
+        request: {
+          method: "GET",
+          path: "/orders/1",
+          body: null,
+          pathParams: {
+            id: "1"
+          }
+        },
+        expected: {
+          status: 200,
+          body: {
+            status: "created"
+          }
+        },
+        dynamicFields: [
+          "orderId"
+        ]
+      }
+    ]);
+  });
+
+  it("preserves the baseline response and snapshot", () => {
+    const result = buildScenarios([
+      {
+        method: "PATCH",
+        path: "/orders/1",
+        pathParams: {
+          id: "1"
+        },
+        queryParams: {},
+        requestBody: {
+          quantity: 10
+        },
+        responses: [
+          {
+            body: {
+              orderId: 1,
+              quantity: 10,
+              status: "shipped"
+            },
+            status: 200,
+            snapshot: {
+              tables: {
+                orders: {
+                  rows: [
+                    {
+                      id: 1,
+                      quantity: 3,
+                      status: "created"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]);
+
+    expect(
+      result[0].expected.body
+    ).toEqual({
+      quantity: 10,
+      status: "shipped"
+    });
+
+    expect(
+      result[0].setup
+    ).toEqual({
+      tables: {
+        orders: {
+          rows: [
+            {
+              id: 1,
+              quantity: 3,
+              status: "created"
+            }
+          ]
+        }
+      }
+    });
+  });
+
+  it("uses the response with a valid snapshot as baseline", () => {
+    const result = buildScenarios([
+      {
+        method: "POST",
+        path: "/orders",
+        pathParams: {},
+        queryParams: {},
+        requestBody: {
+          customerId: 1234
+        },
+        responses: [
+          {
+            body: {
+              orderId: 1,
+              status: "created"
+            },
+            status: 201,
+            snapshot: {
+              tables: {}
+            }
+          },
+          {
+            body: {
+              orderId: 2,
+              status: "created"
+            },
+            status: 201,
+            snapshot: {
+              tables: {
+                orders: {
+                  rows: [
+                    {
+                      id: 1,
+                      customer_id: 1234
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]);
+
+    expect(
+      result[0].setup
+    ).toEqual({
+      tables: {
+        orders: {
+          rows: [
+            {
+              id: 1,
+              customer_id: 1234
+            }
+          ]
+        }
+      }
+    });
+  });
+});

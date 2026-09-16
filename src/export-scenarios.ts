@@ -66,15 +66,39 @@ function getSanitizedFields(
   return Array.from(fields);
 }
 
-async function main() {
-  const scenarioGroups =
-    await getScenarioGroups();
+function hasValidSnapshot(
+  snapshot: any
+): boolean {
+  return (
+    snapshot !== null &&
+    typeof snapshot === "object" &&
+    snapshot.tables !== null &&
+    typeof snapshot.tables === "object" &&
+    !Array.isArray(snapshot.tables) &&
+    Object.keys(snapshot.tables).length > 0
+  );
+}
 
-  if (scenarioGroups.length === 0) {
-    console.log("No scenarios found.");
-    return;
-  }
+export function findBestBaselineResponse(
+  responses: {
+    body: any;
+    status: number;
+    snapshot?: any;
+  }[]
+) {
+  return (
+    responses.find((response) =>
+      hasValidSnapshot(response.snapshot)
+    ) ??
+    responses[0]
+  );
+}
 
+export function buildScenarios(
+  scenarioGroups: Awaited<
+    ReturnType<typeof getScenarioGroups>
+  >
+) {
   const dynamicPathGroups = new Map<
     string,
     {
@@ -94,20 +118,28 @@ async function main() {
 
   for (const group of scenarioGroups) {
     for (const response of group.responses) {
- const key = [
-  group.method,
-  group.path,
-  canonicalStringify(group.pathParams),
-  canonicalStringify(group.queryParams),
-  canonicalStringify(group.requestBody),
-  response.status
-].join(":");
+      const key = [
+        group.method,
+        group.path,
+        canonicalStringify(
+          group.pathParams
+        ),
+        canonicalStringify(
+          group.queryParams
+        ),
+        canonicalStringify(
+          group.requestBody
+        ),
+        response.status
+      ].join(":");
 
       const existing =
         dynamicPathGroups.get(key);
 
       if (existing) {
-        existing.responses.push(response);
+        existing.responses.push(
+          response
+        );
         continue;
       }
 
@@ -123,10 +155,13 @@ async function main() {
     }
   }
 
-  const output = Array.from(
+  return Array.from(
     dynamicPathGroups.values()
   ).map((group, index) => {
-    const baseline = group.responses[0];
+    const baseline =
+      findBestBaselineResponse(
+        group.responses
+      );
 
     const sanitizedRequestBody =
       sanitizeObject(
@@ -199,6 +234,19 @@ async function main() {
 
     return outputScenario;
   });
+}
+
+async function main() {
+  const scenarioGroups =
+    await getScenarioGroups();
+
+  if (scenarioGroups.length === 0) {
+    console.log("No scenarios found.");
+    return;
+  }
+
+  const output =
+    buildScenarios(scenarioGroups);
 
   fs.writeFileSync(
     "shadowspec-scenarios.json",
