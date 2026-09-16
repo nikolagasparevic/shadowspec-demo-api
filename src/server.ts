@@ -41,6 +41,47 @@ app.post("/orders", async (request, reply) => {
   return reply.code(201).send(responseBody);
 });
 
+app.patch("/orders/:id", async (request, reply) => {
+  const params = request.params as {
+    id: string;
+  };
+
+  const body = request.body as {
+    quantity?: number;
+    status?: string;
+  };
+
+  const result = await pool.query(
+    `UPDATE orders
+     SET
+       quantity = COALESCE($1, quantity),
+       status = COALESCE($2, status)
+     WHERE id = $3
+     RETURNING id, customer_id, product_id, quantity, status`,
+    [
+      body.quantity ?? null,
+      body.status ?? null,
+      Number(params.id)
+    ]
+  );
+
+  if (result.rows.length === 0) {
+    return reply.code(404).send({
+      error: "Order not found"
+    });
+  }
+
+  const order = result.rows[0];
+
+  return reply.code(200).send({
+    orderId: order.id,
+    customerId: order.customer_id,
+    productId: order.product_id,
+    quantity: order.quantity,
+    status: order.status
+  });
+});
+
 app.get("/orders/:id", async (request, reply) => {
   const params = request.params as {
     id: string;
@@ -81,15 +122,15 @@ app.get("/orders", async (request, reply) => {
 
   let result;
 
-if (customerId !== undefined) {
-  result = await pool.query(
-    `SELECT id, customer_id, product_id, quantity, status
-     FROM orders
-     WHERE customer_id = $1
-     ORDER BY id ASC`,
-    [customerId]
-  );
-} else {
+  if (customerId !== undefined) {
+    result = await pool.query(
+      `SELECT id, customer_id, product_id, quantity, status
+       FROM orders
+       WHERE customer_id = $1
+       ORDER BY id ASC`,
+      [customerId]
+    );
+  } else {
     result = await pool.query(
       `SELECT id, customer_id, product_id, quantity, status
        FROM orders

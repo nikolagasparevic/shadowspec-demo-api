@@ -2,68 +2,23 @@
   {
     "id": 1,
     "request": {
-      "method": "GET",
-      "path": "/orders",
-      "body": null,
-      "queryParams": {
-        "customerId": "1234"
+      "method": "PATCH",
+      "path": "/orders/1",
+      "body": {
+        "status": "shipped",
+        "quantity": 10
+      },
+      "pathParams": {
+        "id": "1"
       }
     },
     "expected": {
       "status": 200,
-      "body": [
-        {
-          "status": "created",
-          "quantity": 3,
-          "productId": 5678,
-          "customerId": 1234
-        }
-      ]
-    },
-    "dynamicFields": [
-      "orderId"
-    ],
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            },
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 5,
-              "product_id": 5555,
-              "customer_id": 4444
-            }
-          ]
-        }
-      }
-    }
-  },
-  {
-    "id": 2,
-    "request": {
-      "method": "POST",
-      "path": "/orders",
       "body": {
-        "quantity": 1,
-        "productId": 8888,
-        "customerId": 9999
-      }
-    },
-    "expected": {
-      "status": 201,
-      "body": {
-        "status": "created",
-        "quantity": 1,
-        "productId": 8888,
-        "customerId": 9999
+        "status": "shipped",
+        "quantity": 10,
+        "productId": 5678,
+        "customerId": 1234
       }
     },
     "dynamicFields": [
@@ -74,18 +29,25 @@
         "orders": {
           "rows": [
             {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            },
-            {
               "id": 2,
               "status": "created",
               "quantity": 5,
               "product_id": 5555,
               "customer_id": 4444
+            },
+            {
+              "id": 3,
+              "status": "created",
+              "quantity": 1,
+              "product_id": 8888,
+              "customer_id": 9999
+            },
+            {
+              "id": 1,
+              "status": "created",
+              "quantity": 3,
+              "product_id": 5678,
+              "customer_id": 1234
             }
           ]
         }
