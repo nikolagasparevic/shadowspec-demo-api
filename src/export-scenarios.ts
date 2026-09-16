@@ -1,4 +1,5 @@
 import fs from "fs";
+import { canonicalStringify } from "./canonical";
 import { getScenarioGroups } from "./scenario";
 import { sanitizeObject } from "./sanitize";
 import { detectDynamicFields } from "./dynamic-fields";
@@ -93,14 +94,14 @@ async function main() {
 
   for (const group of scenarioGroups) {
     for (const response of group.responses) {
-      const key = [
-        group.method,
-        group.path,
-        JSON.stringify(group.pathParams),
-        JSON.stringify(group.queryParams),
-        JSON.stringify(group.requestBody),
-        response.status
-      ].join(":");
+ const key = [
+  group.method,
+  group.path,
+  canonicalStringify(group.pathParams),
+  canonicalStringify(group.queryParams),
+  canonicalStringify(group.requestBody),
+  response.status
+].join(":");
 
       const existing =
         dynamicPathGroups.get(key);

@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { canonicalStringify } from "./canonical";
 
 export type ScenarioGroup = {
   method: string;
@@ -48,9 +49,9 @@ export async function getScenarioGroups(): Promise<
     const key = [
       row.method,
       row.path,
-      JSON.stringify(pathParams),
-      JSON.stringify(queryParams),
-      JSON.stringify(row.request_body)
+      canonicalStringify(pathParams),
+      canonicalStringify(queryParams),
+      canonicalStringify(row.request_body)
     ].join(":");
 
     const existing = groups.get(key);
