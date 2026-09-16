@@ -1,6 +1,10 @@
 import fs from "fs";
 import { canonicalStringify } from "./canonical";
-import { getScenarioGroups } from "./scenario";
+import {
+  getScenarioGroups,
+  getCapturedRequests,
+  buildScenarioSequences
+} from "./scenario";
 import { sanitizeObject } from "./sanitize";
 import { detectDynamicFields } from "./dynamic-fields";
 
@@ -236,17 +240,125 @@ export function buildScenarios(
   });
 }
 
+export function buildLifecycleScenarios(
+  sequences: ReturnType<
+    typeof buildScenarioSequences
+  >
+) {
+  return sequences
+    .filter(
+      (sequence) =>
+        sequence.requests.length > 1
+    )
+    .map((sequence, index) => {
+      const firstRequest =
+        sequence.requests[0];
+
+      const outputScenario: any = {
+        id: index + 1,
+        steps: []
+      };
+
+      if (firstRequest.snapshot) {
+        outputScenario.setup =
+          sanitizeObject(
+            firstRequest.snapshot
+          );
+      }
+
+      for (const request of sequence.requests) {
+        const step: any = {
+          request: {
+            method: request.method,
+            path: request.path,
+            body: sanitizeObject(
+              request.requestBody
+            )
+          },
+
+          expected: {
+            status: request.responseStatus,
+            body: sanitizeObject(
+              request.responseBody
+            )
+          }
+        };
+
+        if (
+          Object.keys(
+            request.pathParams
+          ).length > 0
+        ) {
+          step.request.pathParams =
+            request.pathParams;
+        }
+
+        if (
+          Object.keys(
+            request.queryParams
+          ).length > 0
+        ) {
+          step.request.queryParams =
+            request.queryParams;
+        }
+
+        const dynamicFields =
+          getSanitizedFields(
+            request.responseBody,
+            step.expected.body
+          );
+
+        if (
+          dynamicFields.length > 0
+        ) {
+          step.dynamicFields =
+            dynamicFields;
+        }
+
+        outputScenario.steps.push(
+          step
+        );
+      }
+
+      return outputScenario;
+    });
+}
+
 async function main() {
   const scenarioGroups =
     await getScenarioGroups();
 
-  if (scenarioGroups.length === 0) {
+  const legacyScenarios =
+    buildScenarios(scenarioGroups);
+
+  const capturedRequests =
+    await getCapturedRequests();
+
+  const sequences =
+    buildScenarioSequences(
+      capturedRequests
+    );
+
+  const lifecycleScenarios =
+    buildLifecycleScenarios(
+      sequences
+    ).map((scenario, index) => ({
+      ...scenario,
+      id:
+        legacyScenarios.length +
+        index +
+        1
+    }));
+
+  const output = [
+    ...legacyScenarios,
+    ...lifecycleScenarios
+  ];
+
+  if (output.length === 0) {
     console.log("No scenarios found.");
     return;
   }
-
-  const output =
-    buildScenarios(scenarioGroups);
 
   fs.writeFileSync(
     "shadowspec-scenarios.json",
@@ -257,7 +369,6 @@ async function main() {
     `Exported ${output.length} ShadowSpec scenario(s).`
   );
 }
-
 main().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -9,7 +9,8 @@ export async function recordApiRequest(
   queryParams: Record<string, string>,
   responseStatus: number,
   responseBody: unknown,
-  snapshot: DatabaseSnapshot
+  snapshot: DatabaseSnapshot,
+  sessionId?: string
 ) {
   const client = await pool.connect();
 
@@ -25,9 +26,10 @@ export async function recordApiRequest(
           query_params,
           request_body,
           response_status,
-          response_body
+          response_body,
+          session_id
         )
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
       [
         method,
@@ -36,7 +38,8 @@ export async function recordApiRequest(
         JSON.stringify(queryParams),
         JSON.stringify(requestBody),
         responseStatus,
-        JSON.stringify(responseBody)
+        JSON.stringify(responseBody),
+        sessionId ?? null
       ]
     );
 

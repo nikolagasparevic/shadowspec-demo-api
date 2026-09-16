@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS api_requests (
     request_body JSONB,
     response_status INTEGER NOT NULL,
     response_body JSONB,
+    session_id VARCHAR(100),
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -1,25 +1,37 @@
 import fs from "fs";
 import type { ReplaySetup } from "./setup-replay";
 
+export type ShadowSpecRequest = {
+  method: string;
+  path: string;
+  body: unknown;
+  pathParams?: Record<string, string>;
+  queryParams?: Record<string, string>;
+};
+
+export type ShadowSpecExpected = {
+  status: number;
+  body: unknown;
+};
+
+export type ShadowSpecStep = {
+  request: ShadowSpecRequest;
+  expected: ShadowSpecExpected;
+  dynamicFields?: string[];
+};
+
 export type ShadowSpecScenario = {
   id: number;
 
-  request: {
-    method: string;
-    path: string;
-    body: unknown;
-    pathParams?: Record<string, string>;
-    queryParams?: Record<string, string>;
-  };
+  request: ShadowSpecRequest;
 
-  expected: {
-    status: number;
-    body: unknown;
-  };
+  expected: ShadowSpecExpected;
 
   dynamicFields?: string[];
 
   setup?: ReplaySetup;
+
+  steps?: ShadowSpecStep[];
 };
 
 export function loadScenarios(): ShadowSpecScenario[] {

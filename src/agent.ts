@@ -18,8 +18,18 @@ export async function registerShadowSpecAgent(
       const snapshot =
         await captureDatabaseSnapshot();
 
+      const sessionId =
+        request.headers[
+          "x-shadowspec-session-id"
+        ];
+
       (request as any).shadowSpecSnapshot =
         snapshot;
+
+      (request as any).shadowSpecSessionId =
+        typeof sessionId === "string"
+          ? sessionId
+          : undefined;
     }
   );
 
@@ -40,18 +50,14 @@ export async function registerShadowSpecAgent(
         request.method,
         request.url.split("?")[0],
         request.body ?? null,
-        request.params as Record<
-          string,
-          string
-        >,
-        request.query as Record<
-          string,
-          string
-        >,
+        request.params as Record<string, string>,
+        request.query as Record<string, string>,
         reply.statusCode,
         responseBody,
         (request as any)
-          .shadowSpecSnapshot
+          .shadowSpecSnapshot,
+        (request as any)
+          .shadowSpecSessionId
       );
 
       return payload;

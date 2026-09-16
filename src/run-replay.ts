@@ -11,6 +11,7 @@ async function main() {
 
   const failures: {
     scenario: number;
+    step?: number;
     method: string;
     path: string;
     queryParams: Record<string, string>;
@@ -27,53 +28,76 @@ async function main() {
   for (const [index, scenario] of scenarios.entries()) {
     console.log(`\n=== Scenario ${index + 1} ===`);
 
-    console.log("Original:");
-    console.log(scenario);
-
     await applyReplaySetup(scenario.setup);
 
-    const result = await replayRequest(
-      scenario.request.method,
-      scenario.request.path,
-      scenario.request.body,
-      scenario.request.pathParams ?? {},
-      scenario.request.queryParams ?? {}
-    );
+    const steps = scenario.steps ?? [
+      {
+        request: scenario.request,
+        expected: scenario.expected,
+        dynamicFields:
+          scenario.dynamicFields ?? []
+      }
+    ];
 
-    console.log("Replay:");
-    console.log(result);
+    for (const [stepIndex, step] of steps.entries()) {
+      const isLifecycle =
+        scenario.steps !== undefined;
 
-    const comparison = compareResponses(
-      scenario.expected.body,
-      result.body,
-      scenario.expected.status,
-      result.status,
-      scenario.dynamicFields ?? []
-    );
+      if (isLifecycle) {
+        console.log(
+          `\n--- Step ${stepIndex + 1} ---`
+        );
+      }
 
-    console.log("Comparison:");
-    console.log(comparison);
+      console.log("Original:");
+      console.log(step);
 
-    if (comparison.passed) {
-      passed++;
-    } else {
-      failed++;
+      const result = await replayRequest(
+        step.request.method,
+        step.request.path,
+        step.request.body,
+        step.request.pathParams ?? {},
+        step.request.queryParams ?? {}
+      );
 
-      failures.push({
-        scenario: index + 1,
-        method: scenario.request.method,
-        path: scenario.request.path,
-        queryParams:
-          scenario.request.queryParams ?? {},
-        differences: comparison.differences
-      });
+      console.log("Replay:");
+      console.log(result);
+
+      const comparison = compareResponses(
+        step.expected.body,
+        result.body,
+        step.expected.status,
+        result.status,
+        step.dynamicFields ?? []
+      );
+
+      console.log("Comparison:");
+      console.log(comparison);
+
+      if (comparison.passed) {
+        passed++;
+      } else {
+        failed++;
+
+        failures.push({
+          scenario: index + 1,
+          step: isLifecycle
+            ? stepIndex + 1
+            : undefined,
+          method: step.request.method,
+          path: step.request.path,
+          queryParams:
+            step.request.queryParams ?? {},
+          differences: comparison.differences
+        });
+      }
     }
   }
 
   console.log("\n================================");
   console.log("ShadowSpec Replay Summary");
   console.log("================================");
-  console.log(`Scenarios: ${scenarios.length}`);
+  console.log(`Checks:    ${passed + failed}`);
   console.log(`Passed:    ${passed}`);
   console.log(`Failed:    ${failed}`);
 
@@ -89,7 +113,15 @@ async function main() {
         ? `${failure.path}?${queryString}`
         : failure.path;
 
-      console.log(`\n❌ Scenario ${failure.scenario}`);
+      const stepLabel =
+        failure.step !== undefined
+          ? ` / Step ${failure.step}`
+          : "";
+
+      console.log(
+        `\n❌ Scenario ${failure.scenario}${stepLabel}`
+      );
+
       console.log(
         `   ${failure.method} ${fullPath}`
       );
@@ -97,10 +129,14 @@ async function main() {
       for (const difference of failure.differences) {
         console.log(`\n   ${difference.field}:`);
         console.log(
-          `   Expected: ${JSON.stringify(difference.expected)}`
+          `   Expected: ${JSON.stringify(
+            difference.expected
+          )}`
         );
         console.log(
-          `   Actual:   ${JSON.stringify(difference.actual)}`
+          `   Actual:   ${JSON.stringify(
+            difference.actual
+          )}`
         );
       }
     }
@@ -108,12 +144,13 @@ async function main() {
 
   console.log("================================");
 
-  const report = createReport(
-    scenarios.length,
-    passed,
-    failed,
-    failures
-  );
+const report = createReport(
+  scenarios.length,
+  passed + failed,
+  passed,
+  failed,
+  failures
+);
 
   fs.writeFileSync(
     "shadowspec-report.json",
@@ -121,7 +158,9 @@ async function main() {
   );
 
   console.log("\nShadowSpec Report:");
-  console.log(JSON.stringify(report, null, 2));
+  console.log(
+    JSON.stringify(report, null, 2)
+  );
 
   if (failed > 0) {
     throw new Error(

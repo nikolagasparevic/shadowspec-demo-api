@@ -6,6 +6,7 @@ import {
 
 import {
   buildScenarios,
+  buildLifecycleScenarios,
   findBestBaselineResponse
 } from "../src/export-scenarios";
 
@@ -128,6 +129,7 @@ describe("buildScenarios", () => {
   it("builds a scenario from a grouped response", () => {
     const result = buildScenarios([
       {
+        id: 1,
         method: "GET",
         path: "/orders/1",
         pathParams: {
@@ -174,6 +176,7 @@ describe("buildScenarios", () => {
   it("preserves the baseline response and snapshot", () => {
     const result = buildScenarios([
       {
+        id: 1,
         method: "PATCH",
         path: "/orders/1",
         pathParams: {
@@ -236,6 +239,7 @@ describe("buildScenarios", () => {
   it("uses the response with a valid snapshot as baseline", () => {
     const result = buildScenarios([
       {
+        id: 1,
         method: "POST",
         path: "/orders",
         pathParams: {},
@@ -291,5 +295,191 @@ describe("buildScenarios", () => {
         }
       }
     });
+  });
+});
+
+describe("buildLifecycleScenarios", () => {
+  it("builds a multi-step scenario from a session sequence", () => {
+    const result =
+      buildLifecycleScenarios([
+        {
+          sessionId: "workflow-test-001",
+          requests: [
+            {
+              id: 21,
+              sessionId: "workflow-test-001",
+              method: "POST",
+              path: "/orders",
+              pathParams: {},
+              queryParams: {},
+              requestBody: {
+                customerId: 1234,
+                productId: 7777,
+                quantity: 1
+              },
+              responseBody: {
+                orderId: 3,
+                customerId: 1234,
+                productId: 7777,
+                quantity: 1,
+                status: "created"
+              },
+              responseStatus: 201,
+              snapshot: {
+                tables: {
+                  orders: {
+                    rows: [
+                      {
+                        id: 1,
+                        customer_id: 1234,
+                        product_id: 5678,
+                        quantity: 3,
+                        status: "created"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              id: 22,
+              sessionId: "workflow-test-001",
+              method: "GET",
+              path: "/orders/3",
+              pathParams: {
+                id: "3"
+              },
+              queryParams: {},
+              requestBody: null,
+              responseBody: {
+                orderId: 3,
+                customerId: 1234,
+                productId: 7777,
+                quantity: 1,
+                status: "created"
+              },
+              responseStatus: 200,
+              snapshot: {
+                tables: {
+                  orders: {
+                    rows: [
+                      {
+                        id: 1,
+                        customer_id: 1234,
+                        product_id: 5678,
+                        quantity: 3,
+                        status: "created"
+                      },
+                      {
+                        id: 3,
+                        customer_id: 1234,
+                        product_id: 7777,
+                        quantity: 1,
+                        status: "created"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]);
+
+    expect(result).toHaveLength(1);
+
+    expect(result[0]).toEqual({
+      id: 1,
+      setup: {
+        tables: {
+          orders: {
+            rows: [
+              {
+                id: 1,
+                customer_id: 1234,
+                product_id: 5678,
+                quantity: 3,
+                status: "created"
+              }
+            ]
+          }
+        }
+      },
+      steps: [
+        {
+          request: {
+            method: "POST",
+            path: "/orders",
+            body: {
+              customerId: 1234,
+              productId: 7777,
+              quantity: 1
+            }
+          },
+          expected: {
+            status: 201,
+            body: {
+              customerId: 1234,
+              productId: 7777,
+              quantity: 1,
+              status: "created"
+            }
+          },
+          dynamicFields: [
+            "orderId"
+          ]
+        },
+        {
+          request: {
+            method: "GET",
+            path: "/orders/3",
+            body: null,
+            pathParams: {
+              id: "3"
+            }
+          },
+          expected: {
+            status: 200,
+            body: {
+              customerId: 1234,
+              productId: 7777,
+              quantity: 1,
+              status: "created"
+            }
+          },
+          dynamicFields: [
+            "orderId"
+          ]
+        }
+      ]
+    });
+  });
+
+  it("ignores single-request sessions", () => {
+    const result =
+      buildLifecycleScenarios([
+        {
+          sessionId: "single-request",
+          requests: [
+            {
+              id: 20,
+              sessionId: "single-request",
+              method: "GET",
+              path: "/orders/1",
+              pathParams: {
+                id: "1"
+              },
+              queryParams: {},
+              requestBody: null,
+              responseBody: {
+                orderId: 1
+              },
+              responseStatus: 200
+            }
+          ]
+        }
+      ]);
+
+    expect(result).toEqual([]);
   });
 });
