@@ -35,10 +35,7 @@ export async function replayRequest(
   }
 
   const options: RequestInit = {
-    method,
-    headers: {
-      "Content-Type": "application/json"
-    }
+    method
   };
 
   if (
@@ -46,6 +43,10 @@ export async function replayRequest(
     method !== "HEAD" &&
     requestBody !== null
   ) {
+    options.headers = {
+      "Content-Type": "application/json"
+    };
+
     options.body = JSON.stringify(requestBody);
   }
 

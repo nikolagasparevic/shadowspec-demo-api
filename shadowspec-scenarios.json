@@ -53,5 +53,57 @@
         }
       }
     }
+  },
+  {
+    "id": 2,
+    "request": {
+      "method": "DELETE",
+      "path": "/orders/2",
+      "body": null,
+      "pathParams": {
+        "id": "2"
+      }
+    },
+    "expected": {
+      "status": 200,
+      "body": {
+        "status": "created",
+        "quantity": 5,
+        "productId": 5555,
+        "customerId": 4444
+      }
+    },
+    "dynamicFields": [
+      "orderId"
+    ],
+    "setup": {
+      "tables": {
+        "orders": {
+          "rows": [
+            {
+              "id": 2,
+              "status": "created",
+              "quantity": 5,
+              "product_id": 5555,
+              "customer_id": 4444
+            },
+            {
+              "id": 3,
+              "status": "created",
+              "quantity": 1,
+              "product_id": 8888,
+              "customer_id": 9999
+            },
+            {
+              "id": 1,
+              "status": "shipped",
+              "quantity": 10,
+              "product_id": 5678,
+              "customer_id": 1234
+            }
+          ]
+        }
+      }
+    }
   }
 ]

@@ -82,6 +82,35 @@ app.patch("/orders/:id", async (request, reply) => {
   });
 });
 
+app.delete("/orders/:id", async (request, reply) => {
+  const params = request.params as {
+    id: string;
+  };
+
+  const result = await pool.query(
+    `DELETE FROM orders
+     WHERE id = $1
+     RETURNING id, customer_id, product_id, quantity, status`,
+    [Number(params.id)]
+  );
+
+  if (result.rows.length === 0) {
+    return reply.code(404).send({
+      error: "Order not found"
+    });
+  }
+
+  const order = result.rows[0];
+
+  return reply.code(200).send({
+    orderId: order.id,
+    customerId: order.customer_id,
+    productId: order.product_id,
+    quantity: order.quantity,
+    status: order.status
+  });
+});
+
 app.get("/orders/:id", async (request, reply) => {
   const params = request.params as {
     id: string;
