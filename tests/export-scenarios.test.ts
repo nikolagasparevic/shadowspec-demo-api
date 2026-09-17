@@ -296,6 +296,76 @@ describe("buildScenarios", () => {
       }
     });
   });
+    it("does not mark state-dependent fields as dynamic across different database snapshots", () => {
+    const result = buildScenarios([
+      {
+        id: 1,
+        method: "GET",
+        path: "/orders/2",
+        pathParams: {
+          id: "2"
+        },
+        queryParams: {},
+        requestBody: null,
+        responses: [
+          {
+            body: {
+              orderId: 2,
+              customerId: 1234,
+              productId: 9999,
+              quantity: 2,
+              status: "created"
+            },
+            status: 200,
+            snapshot: {
+              tables: {
+                orders: {
+                  rows: [
+                    {
+                      id: 2,
+                      customer_id: 1234,
+                      product_id: 9999,
+                      quantity: 2,
+                      status: "created"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            body: {
+              orderId: 2,
+              customerId: 1234,
+              productId: 12345,
+              quantity: 2,
+              status: "created"
+            },
+            status: 200,
+            snapshot: {
+              tables: {
+                orders: {
+                  rows: [
+                    {
+                      id: 2,
+                      customer_id: 1234,
+                      product_id: 12345,
+                      quantity: 2,
+                      status: "created"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]);
+
+    expect(result[0].dynamicFields).toEqual([
+      "orderId"
+    ]);
+  });
 });
 
 describe("buildLifecycleScenarios", () => {

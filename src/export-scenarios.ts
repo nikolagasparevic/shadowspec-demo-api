@@ -82,6 +82,73 @@ function hasValidSnapshot(
     Object.keys(snapshot.tables).length > 0
   );
 }
+function isStateDerivedField(
+  field: string,
+  baseline: {
+    body: any;
+    snapshot?: any;
+  },
+  pathParams: Record<string, string>
+): boolean {
+  if (!field || field.includes(".")) {
+    return false;
+  }
+
+  if (
+    Object.keys(pathParams).length === 0
+  ) {
+    return false;
+  }
+
+  if (
+    !hasValidSnapshot(
+      baseline.snapshot
+    )
+  ) {
+    return false;
+  }
+
+  const snakeCaseField =
+    field.replace(
+      /[A-Z]/g,
+      (letter) => `_${letter.toLowerCase()}`
+    );
+
+  const entityId =
+    pathParams.id;
+
+  if (entityId === undefined) {
+    return false;
+  }
+
+  const entityIdNumber =
+    Number(entityId);
+
+  if (!Number.isFinite(entityIdNumber)) {
+    return false;
+  }
+
+  const value =
+    baseline.body?.[field];
+
+  if (value === undefined) {
+    return false;
+  }
+
+  const tables =
+    baseline.snapshot.tables ?? {};
+
+  return Object.values(tables).some(
+    (table: any) =>
+      Array.isArray(table?.rows) &&
+      table.rows.some(
+        (row: any) =>
+          Number(row?.id) ===
+            entityIdNumber &&
+          row?.[snakeCaseField] === value
+      )
+  );
+}
 
 export function findBestBaselineResponse(
   responses: {
@@ -217,12 +284,22 @@ export function buildScenarios(
         sanitizedResponseBody
       );
 
-    const dynamicFields = Array.from(
-      new Set([
-        ...detectedDynamicFields,
-        ...sanitizedDynamicFields
-      ])
-    );
+const stateDerivedFields =
+  detectedDynamicFields.filter(
+    (field) =>
+      !isStateDerivedField(
+        field,
+        baseline,
+        group.pathParams
+      )
+  );
+
+const dynamicFields = Array.from(
+  new Set([
+    ...stateDerivedFields,
+    ...sanitizedDynamicFields
+  ])
+);
 
     if (dynamicFields.length > 0) {
       outputScenario.dynamicFields =

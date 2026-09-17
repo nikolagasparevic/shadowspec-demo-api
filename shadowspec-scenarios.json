@@ -165,7 +165,6 @@
       }
     },
     "dynamicFields": [
-      "productId",
       "orderId"
     ],
     "setup": {
@@ -193,6 +192,104 @@
   },
   {
     "id": 5,
+    "request": {
+      "method": "POST",
+      "path": "/orders",
+      "body": {
+        "quantity": 1,
+        "productId": 7777,
+        "customerId": 1234
+      }
+    },
+    "expected": {
+      "status": 201,
+      "body": {
+        "status": "created",
+        "quantity": 1,
+        "productId": 7777,
+        "customerId": 1234
+      }
+    },
+    "dynamicFields": [
+      "orderId"
+    ],
+    "setup": {
+      "tables": {
+        "orders": {
+          "rows": [
+            {
+              "id": 1,
+              "status": "created",
+              "quantity": 3,
+              "product_id": 5678,
+              "customer_id": 1234
+            },
+            {
+              "id": 2,
+              "status": "created",
+              "quantity": 2,
+              "product_id": 9999,
+              "customer_id": 1234
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": 6,
+    "request": {
+      "method": "GET",
+      "path": "/orders/3",
+      "body": null,
+      "pathParams": {
+        "id": "3"
+      }
+    },
+    "expected": {
+      "status": 200,
+      "body": {
+        "status": "created",
+        "quantity": 1,
+        "productId": 7777,
+        "customerId": 1234
+      }
+    },
+    "dynamicFields": [
+      "orderId"
+    ],
+    "setup": {
+      "tables": {
+        "orders": {
+          "rows": [
+            {
+              "id": 1,
+              "status": "created",
+              "quantity": 3,
+              "product_id": 5678,
+              "customer_id": 1234
+            },
+            {
+              "id": 2,
+              "status": "created",
+              "quantity": 2,
+              "product_id": 9999,
+              "customer_id": 1234
+            },
+            {
+              "id": 3,
+              "status": "created",
+              "quantity": 1,
+              "product_id": 7777,
+              "customer_id": 1234
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": 7,
     "steps": [
       {
         "request": {
