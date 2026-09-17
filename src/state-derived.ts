@@ -1,3 +1,5 @@
+import type { DatabaseSnapshot } from "./db-snapshot";
+
 export function hasValidSnapshot(
   snapshot: any
 ): boolean {
@@ -22,7 +24,7 @@ export function isStateDerivedField(
   field: string,
   baseline: {
     body: any;
-    snapshot?: any;
+    snapshot?: DatabaseSnapshot;
   },
   pathParams: Record<string, string>
 ): boolean {
