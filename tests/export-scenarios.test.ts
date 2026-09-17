@@ -238,6 +238,60 @@ describe("buildScenarios", () => {
     });
   });
 
+    it("sanitizes sensitive fields from the database snapshot", () => {
+    const result = buildScenarios([
+      {
+        id: 1,
+        method: "GET",
+        path: "/users/1",
+        pathParams: {
+          id: "1"
+        },
+        queryParams: {},
+        requestBody: null,
+        responses: [
+          {
+            body: {
+              status: "active"
+            },
+            status: 200,
+            snapshot: {
+              tables: {
+                users: {
+                  rows: [
+                    {
+                      id: 1,
+                      username: "nikola",
+                      password: "super-secret",
+                      token: "abc123",
+                      email: "test@example.com"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]);
+
+    expect(
+      result[0].setup
+    ).toEqual({
+      tables: {
+        users: {
+          rows: [
+            {
+              id: 1,
+              username: "nikola",
+              email: "test@example.com"
+            }
+          ]
+        }
+      }
+    });
+  });
+
   it("uses the response with a valid snapshot as baseline", () => {
     const result = buildScenarios([
       {
