@@ -82,6 +82,13 @@ function hasValidSnapshot(
     Object.keys(snapshot.tables).length > 0
   );
 }
+function toSnakeCase(field: string): string {
+  return field.replace(
+    /[A-Z]/g,
+    (letter) => `_${letter.toLowerCase()}`
+  );
+}
+
 function isStateDerivedField(
   field: string,
   baseline: {
@@ -109,20 +116,28 @@ function isStateDerivedField(
   }
 
   const snakeCaseField =
-    field.replace(
-      /[A-Z]/g,
-      (letter) => `_${letter.toLowerCase()}`
+    toSnakeCase(field);
+
+  const entityIdParam =
+    Object.entries(pathParams).find(
+      ([key, value]) =>
+        (
+          key.toLowerCase() === "id" ||
+          key.toLowerCase().endsWith("id")
+        ) &&
+        Number.isFinite(Number(value))
+    ) ??
+    Object.entries(pathParams).find(
+      ([, value]) =>
+        Number.isFinite(Number(value))
     );
 
-  const entityId =
-    pathParams.id;
-
-  if (entityId === undefined) {
+  if (entityIdParam === undefined) {
     return false;
   }
 
   const entityIdNumber =
-    Number(entityId);
+    Number(entityIdParam[1]);
 
   if (!Number.isFinite(entityIdNumber)) {
     return false;
