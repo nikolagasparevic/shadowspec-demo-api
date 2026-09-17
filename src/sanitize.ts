@@ -35,12 +35,15 @@ function getSensitiveFields(): Set<string> {
 }
 
 export function sanitizeObject(
-  value: any,
+  value: unknown,
   sensitiveFields = getSensitiveFields()
-): any {
+): unknown {
   if (Array.isArray(value)) {
     return value.map((item) =>
-      sanitizeObject(item, sensitiveFields)
+      sanitizeObject(
+        item,
+        sensitiveFields
+      )
     );
   }
 
@@ -48,7 +51,15 @@ export function sanitizeObject(
     value !== null &&
     typeof value === "object"
   ) {
-    return Object.keys(value).reduce(
+    const objectValue =
+      value as Record<
+        string,
+        unknown
+      >;
+
+    return Object.keys(objectValue).reduce<
+      Record<string, unknown>
+    >(
       (result, key) => {
         if (
           sensitiveFields.has(
@@ -59,13 +70,13 @@ export function sanitizeObject(
         }
 
         result[key] = sanitizeObject(
-          value[key],
+          objectValue[key],
           sensitiveFields
         );
 
         return result;
       },
-      {} as any
+      {}
     );
   }
 
