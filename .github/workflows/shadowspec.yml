@@ -181,7 +181,7 @@ jobs:
                 }
               }
 
-              body += `## 🔴 ${report.failedScenarios} behavioral regression${report.failedScenarios === 1 ? "" : "s"} detected\n\n`;
+              body += `## 🔴 ${regressionGroups.size} behavioral regression${regressionGroups.size === 1 ? "" : "s"} detected\n\n`;
 
               for (const regression of regressionGroups.values()) {
                 body += `### \`${formatRequest(regression)}\`\n\n`;
