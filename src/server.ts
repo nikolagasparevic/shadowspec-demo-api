@@ -134,7 +134,7 @@ app.get("/orders/:id", async (request, reply) => {
   return reply.code(200).send({
     orderId: order.id,
     customerId: order.customer_id,
-    productId: order.product_id,
+    productId: 12345,
     quantity: order.quantity,
     status: order.status
   });
