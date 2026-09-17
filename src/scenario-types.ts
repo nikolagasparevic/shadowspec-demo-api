@@ -1,7 +1,7 @@
 import type { DatabaseSnapshot } from "./db-snapshot";
 
 export type ScenarioResponse = {
-  body: any;
+  body: unknown;
   status: number;
   snapshot?: DatabaseSnapshot;
 };
@@ -12,7 +12,7 @@ export type ScenarioGroup = {
   path: string;
   pathParams: Record<string, string>;
   queryParams: Record<string, string>;
-  requestBody: any;
+  requestBody: unknown;
   responses: ScenarioResponse[];
 };
 
@@ -23,8 +23,8 @@ export type CapturedRequest = {
   path: string;
   pathParams: Record<string, string>;
   queryParams: Record<string, string>;
-  requestBody: any;
-  responseBody: any;
+  requestBody: unknown;
+  responseBody: unknown;
   responseStatus: number;
   snapshot?: DatabaseSnapshot;
 };
@@ -32,4 +32,4 @@ export type CapturedRequest = {
 export type ScenarioSequence = {
   sessionId: string;
   requests: CapturedRequest[];
-};
+}
