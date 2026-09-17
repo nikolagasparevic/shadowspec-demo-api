@@ -83,6 +83,7 @@ jobs:
         env:
           DB_NAME: shadowspec_replay
           SHADOWSPEC_TARGET_URL: http://127.0.0.1:3000
+          SHADOWSPEC_TABLES: orders
         run: |
           DB_NAME=shadowspec_replay npx tsx src/server.ts > target.log 2>&1 &
 
