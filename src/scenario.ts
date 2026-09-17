@@ -1,19 +1,16 @@
 import { pool } from "./db";
 import { canonicalStringify } from "./canonical";
+import type {
+  CapturedRequest,
+  ScenarioGroup,
+  ScenarioSequence
+} from "./scenario-types";
 
-export type ScenarioGroup = {
-  id: number;
-  method: string;
-  path: string;
-  pathParams: Record<string, string>;
-  queryParams: Record<string, string>;
-  requestBody: any;
-  responses: {
-    body: any;
-    status: number;
-    snapshot?: any;
-  }[];
-};
+export type {
+  CapturedRequest,
+  ScenarioGroup,
+  ScenarioSequence
+} from "./scenario-types";
 
 export async function getScenarioGroups(): Promise<
   ScenarioGroup[]
@@ -89,19 +86,6 @@ export async function getScenarioGroups(): Promise<
   return Array.from(groups.values());
 }
 
-export type CapturedRequest = {
-  id: number;
-  sessionId?: string;
-  method: string;
-  path: string;
-  pathParams: Record<string, string>;
-  queryParams: Record<string, string>;
-  requestBody: any;
-  responseBody: any;
-  responseStatus: number;
-  snapshot?: any;
-};
-
 export async function getCapturedRequests(): Promise<
   CapturedRequest[]
 > {
@@ -144,11 +128,6 @@ export async function getCapturedRequests(): Promise<
       row.snapshot
   }));
 }
-
-export type ScenarioSequence = {
-  sessionId: string;
-  requests: CapturedRequest[];
-};
 
 export function buildScenarioSequences(
   requests: CapturedRequest[]
