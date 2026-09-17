@@ -1,9 +1,10 @@
 import type { DatabaseSnapshot } from "./db-snapshot";
 
 export function hasValidSnapshot(
-  snapshot: any
-): boolean {
+  snapshot: DatabaseSnapshot | undefined
+): snapshot is DatabaseSnapshot {
   return (
+    snapshot !== undefined &&
     snapshot !== null &&
     typeof snapshot === "object" &&
     snapshot.tables !== null &&
@@ -23,7 +24,7 @@ function toSnakeCase(field: string): string {
 export function isStateDerivedField(
   field: string,
   baseline: {
-    body: any;
+    body: unknown;
     snapshot?: DatabaseSnapshot;
   },
   pathParams: Record<string, string>
@@ -74,24 +75,33 @@ export function isStateDerivedField(
     return false;
   }
 
+  if (
+    baseline.body === null ||
+    typeof baseline.body !== "object" ||
+    Array.isArray(baseline.body)
+  ) {
+    return false;
+  }
+
   const value =
-    baseline.body?.[field];
+    (baseline.body as Record<string, unknown>)[
+      field
+    ];
 
   if (value === undefined) {
     return false;
   }
 
   const tables =
-    baseline.snapshot.tables ?? {};
+    baseline.snapshot.tables;
 
   return Object.values(tables).some(
-    (table: any) =>
-      Array.isArray(table?.rows) &&
+    (table) =>
       table.rows.some(
-        (row: any) =>
-          Number(row?.id) ===
+        (row) =>
+          Number(row.id) ===
             entityIdNumber &&
-          row?.[snakeCaseField] === value
+          row[snakeCaseField] === value
       )
   );
 }

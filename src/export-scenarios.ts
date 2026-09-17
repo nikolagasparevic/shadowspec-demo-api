@@ -11,10 +11,45 @@ import {
   hasValidSnapshot,
   isStateDerivedField
 } from "./state-derived";
+import type { ScenarioResponse } from "./scenario-types";
+
+type ExportedScenarioRequest = {
+  method: string;
+  path: string;
+  body: unknown;
+  pathParams?: Record<string, string>;
+  queryParams?: Record<string, string>;
+};
+
+type ExportedScenarioStep = {
+  request: ExportedScenarioRequest;
+  expected: {
+    status: number;
+    body: unknown;
+  };
+  dynamicFields?: string[];
+};
+
+type ExportedScenario = {
+  id: number;
+  request: ExportedScenarioRequest;
+  expected: {
+    status: number;
+    body: unknown;
+  };
+  dynamicFields?: string[];
+  setup?: unknown;
+};
+
+type ExportedLifecycleScenario = {
+  id: number;
+  steps: ExportedScenarioStep[];
+  setup?: unknown;
+};
 
 function getSanitizedFields(
-  original: any,
-  sanitized: any
+  original: unknown,
+  sanitized: unknown
 ): string[] {
   const fields = new Set<string>();
 
@@ -48,10 +83,18 @@ function getSanitizedFields(
     sanitized !== null &&
     typeof sanitized === "object"
   ) {
-    for (const key of Object.keys(original)) {
+    const originalRecord =
+      original as Record<string, unknown>;
+
+    const sanitizedRecord =
+      sanitized as Record<string, unknown>;
+
+    for (const key of Object.keys(
+      originalRecord
+    )) {
       if (
         !Object.prototype.hasOwnProperty.call(
-          sanitized,
+          sanitizedRecord,
           key
         )
       ) {
@@ -61,8 +104,8 @@ function getSanitizedFields(
 
       const nestedFields =
         getSanitizedFields(
-          original[key],
-          sanitized[key]
+          originalRecord[key],
+          sanitizedRecord[key]
         );
 
       for (const field of nestedFields) {
@@ -74,14 +117,9 @@ function getSanitizedFields(
   return Array.from(fields);
 }
 
-
 export function findBestBaselineResponse(
-  responses: {
-    body: any;
-    status: number;
-    snapshot?: any;
-  }[]
-) {
+  responses: ScenarioResponse[]
+): ScenarioResponse {
   return (
     responses.find((response) =>
       hasValidSnapshot(response.snapshot)
@@ -102,13 +140,9 @@ export function buildScenarios(
       path: string;
       pathParams: Record<string, string>;
       queryParams: Record<string, string>;
-      requestBody: any;
+      requestBody: unknown;
       responseStatus: number;
-      responses: {
-        body: any;
-        status: number;
-        snapshot?: any;
-      }[];
+      responses: ScenarioResponse[];
     }
   >();
 
@@ -165,9 +199,11 @@ export function buildScenarios(
       );
 
     const sanitizedResponseBody =
-      sanitizeObject(baseline.body);
+      sanitizeObject(
+        baseline.body
+      );
 
-    const outputScenario: any = {
+    const outputScenario: ExportedScenario = {
       id: index + 1,
 
       request: {
@@ -209,22 +245,22 @@ export function buildScenarios(
         sanitizedResponseBody
       );
 
-const stateDerivedFields =
-  detectedDynamicFields.filter(
-    (field) =>
-      !isStateDerivedField(
-        field,
-        baseline,
-        group.pathParams
-      )
-  );
+    const stateDerivedFields =
+      detectedDynamicFields.filter(
+        (field) =>
+          !isStateDerivedField(
+            field,
+            baseline,
+            group.pathParams
+          )
+      );
 
-const dynamicFields = Array.from(
-  new Set([
-    ...stateDerivedFields,
-    ...sanitizedDynamicFields
-  ])
-);
+    const dynamicFields = Array.from(
+      new Set([
+        ...stateDerivedFields,
+        ...sanitizedDynamicFields
+      ])
+    );
 
     if (dynamicFields.length > 0) {
       outputScenario.dynamicFields =
@@ -256,7 +292,8 @@ export function buildLifecycleScenarios(
       const firstRequest =
         sequence.requests[0];
 
-      const outputScenario: any = {
+      const outputScenario:
+        ExportedLifecycleScenario = {
         id: index + 1,
         steps: []
       };
@@ -269,7 +306,7 @@ export function buildLifecycleScenarios(
       }
 
       for (const request of sequence.requests) {
-        const step: any = {
+        const step: ExportedScenarioStep = {
           request: {
             method: request.method,
             path: request.path,
@@ -331,7 +368,9 @@ async function main() {
     await getScenarioGroups();
 
   const legacyScenarios =
-    buildScenarios(scenarioGroups);
+    buildScenarios(
+      scenarioGroups
+    );
 
   const capturedRequests =
     await getCapturedRequests();
@@ -364,13 +403,18 @@ async function main() {
 
   fs.writeFileSync(
     "shadowspec-scenarios.json",
-    JSON.stringify(output, null, 2)
+    JSON.stringify(
+      output,
+      null,
+      2
+    )
   );
 
   console.log(
     `Exported ${output.length} ShadowSpec scenario(s).`
   );
 }
+
 main().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -1,3 +1,5 @@
+import type { ScenarioResponse } from "../src/scenario-types";
+
 import {
   describe,
   expect,
@@ -12,7 +14,7 @@ import {
 
 describe("findBestBaselineResponse", () => {
   it("prefers a response with a valid snapshot", () => {
-    const responses = [
+    const responses: ScenarioResponse[] = [
       {
         body: {
           orderId: 1
@@ -47,6 +49,7 @@ describe("findBestBaselineResponse", () => {
       )
     ).toBe(responses[1]);
   });
+});
 
   it("falls back to the first response when no valid snapshot exists", () => {
     const responses = [
@@ -123,7 +126,6 @@ describe("findBestBaselineResponse", () => {
       )
     ).toBe(responses[1]);
   });
-});
 
 describe("buildScenarios", () => {
   it("builds a scenario from a grouped response", () => {
