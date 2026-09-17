@@ -13,6 +13,16 @@ export type ReplaySetup = {
   >;
 };
 
+function getConfiguredTables(): string[] {
+  const value =
+    process.env.SHADOWSPEC_TABLES || "";
+
+  return value
+    .split(",")
+    .map((table) => table.trim())
+    .filter(Boolean);
+}
+
 function validateIdentifier(
   value: string
 ) {
@@ -24,28 +34,17 @@ function validateIdentifier(
 }
 
 export async function resetReplayDatabase() {
-  await pool.query(`
-    DO $$
-    DECLARE
-      table_name text;
-    BEGIN
-      FOR table_name IN
-        SELECT tablename
-        FROM pg_tables
-        WHERE schemaname = 'public'
-          AND tablename NOT IN (
-            'api_requests',
-            'api_request_snapshots'
-          )
-      LOOP
-        EXECUTE format(
-          'TRUNCATE TABLE %I RESTART IDENTITY CASCADE',
-          table_name
-        );
-      END LOOP;
-    END
-    $$;
-  `);
+  const tables =
+    getConfiguredTables();
+
+  for (const tableName of tables) {
+    validateIdentifier(tableName);
+
+    await pool.query(
+      `TRUNCATE TABLE "${tableName}"
+       RESTART IDENTITY CASCADE`
+    );
+  }
 }
 
 export async function applyReplaySetup(
