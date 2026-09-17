@@ -1,6 +1,24 @@
-import type { FastifyInstance } from "fastify";
-import { recordApiRequest } from "./recorder";
-import { captureDatabaseSnapshot } from "./db-snapshot";
+import type {
+  FastifyInstance
+} from "fastify";
+import type {
+  DatabaseSnapshot
+} from "./db-snapshot";
+import {
+  recordApiRequest
+} from "./recorder";
+import {
+  captureDatabaseSnapshot
+} from "./db-snapshot";
+
+declare module "fastify" {
+  interface FastifyRequest {
+    shadowSpecSnapshot?:
+      DatabaseSnapshot;
+    shadowSpecSessionId?:
+      string;
+  }
+}
 
 export async function registerShadowSpecAgent(
   app: FastifyInstance
@@ -11,6 +29,16 @@ export async function registerShadowSpecAgent(
   if (!enabled) {
     return;
   }
+
+app.decorateRequest(
+  "shadowSpecSnapshot",
+  undefined
+);
+
+app.decorateRequest(
+  "shadowSpecSessionId",
+  undefined
+);
 
   app.addHook(
     "preHandler",
@@ -23,10 +51,10 @@ export async function registerShadowSpecAgent(
           "x-shadowspec-session-id"
         ];
 
-      (request as any).shadowSpecSnapshot =
+      request.shadowSpecSnapshot =
         snapshot;
 
-      (request as any).shadowSpecSessionId =
+      request.shadowSpecSessionId =
         typeof sessionId === "string"
           ? sessionId
           : undefined;
@@ -35,29 +63,49 @@ export async function registerShadowSpecAgent(
 
   app.addHook(
     "onSend",
-    async (request, reply, payload) => {
-      let responseBody: unknown = payload;
+    async (
+      request,
+      reply,
+      payload
+    ) => {
+      let responseBody: unknown =
+        payload;
 
       if (typeof payload === "string") {
         try {
-          responseBody = JSON.parse(payload);
+          responseBody =
+            JSON.parse(payload);
         } catch {
-          responseBody = payload;
+          responseBody =
+            payload;
         }
+      }
+
+      if (
+        request.shadowSpecSnapshot ===
+        undefined
+      ) {
+        throw new Error(
+          "ShadowSpec snapshot is missing."
+        );
       }
 
       await recordApiRequest(
         request.method,
         request.url.split("?")[0],
         request.body ?? null,
-        request.params as Record<string, string>,
-        request.query as Record<string, string>,
+        request.params as Record<
+          string,
+          string
+        >,
+        request.query as Record<
+          string,
+          string
+        >,
         reply.statusCode,
         responseBody,
-        (request as any)
-          .shadowSpecSnapshot,
-        (request as any)
-          .shadowSpecSessionId
+        request.shadowSpecSnapshot,
+        request.shadowSpecSessionId
       );
 
       return payload;
