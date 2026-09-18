@@ -16,11 +16,19 @@ export type ReplaySetup = {
 function getConfiguredTables(): string[] {
   const value =
     process.env.SHADOWSPEC_TABLES || "";
+  const seen = new Set<string>();
 
   return value
     .split(",")
     .map((table) => table.trim())
-    .filter(Boolean);
+    .filter((table) => {
+      if (!table || seen.has(table)) {
+        return false;
+      }
+
+      seen.add(table);
+      return true;
+    });
 }
 
 function validateIdentifier(
@@ -56,10 +64,13 @@ export async function applyReplaySetup(
     return;
   }
 
-  for (const [
-    tableName,
-    table
-  ] of Object.entries(setup.tables)) {
+  for (const tableName of getConfiguredTables()) {
+    const table = setup.tables[tableName];
+
+    if (!table) {
+      continue;
+    }
+
     validateIdentifier(tableName);
 
     for (const row of table.rows) {
