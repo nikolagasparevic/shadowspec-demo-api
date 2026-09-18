@@ -37,6 +37,32 @@ function getConfiguredTables(): string[] {
     .filter(Boolean);
 }
 
+function getCaptureErrorDetails(
+  error: unknown
+): {
+  errorName: string;
+  errorCode?: string;
+} {
+  const errorName =
+    error instanceof Error
+      ? error.name
+      : "UnknownError";
+  const errorCode =
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof error.code === "string"
+      ? error.code
+      : undefined;
+
+  return {
+    errorName,
+    ...(errorCode === undefined
+      ? {}
+      : { errorCode })
+  };
+}
+
 export function registerShadowSpec(
   app: FastifyInstance,
   options: ShadowSpecOptions
@@ -71,24 +97,30 @@ export function registerShadowSpec(
   app.addHook(
     "preHandler",
     async (request) => {
-      const snapshot =
-        await captureDatabaseSnapshot(
-          applicationPool,
-          tables
-        );
-
       const sessionId =
         request.headers[
           "x-shadowspec-session-id"
         ];
 
-      request.shadowSpecSnapshot =
-        snapshot;
-
       request.shadowSpecSessionId =
         typeof sessionId === "string"
           ? sessionId
           : undefined;
+
+      try {
+        request.shadowSpecSnapshot =
+          await captureDatabaseSnapshot(
+            applicationPool,
+            tables
+          );
+      } catch (error) {
+        request.shadowSpecSnapshot =
+          undefined;
+        request.log.error(
+          getCaptureErrorDetails(error),
+          "ShadowSpec snapshot capture failed; request will not be recorded."
+        );
+      }
     }
   );
 
@@ -116,29 +148,34 @@ export function registerShadowSpec(
         request.shadowSpecSnapshot ===
         undefined
       ) {
-        throw new Error(
-          "ShadowSpec snapshot is missing."
-        );
+        return payload;
       }
 
-      await recordApiRequest(
-        capturePool,
-        request.method,
-        request.url.split("?")[0],
-        request.body ?? null,
-        request.params as Record<
-          string,
-          string
-        >,
-        request.query as Record<
-          string,
-          string
-        >,
-        reply.statusCode,
-        responseBody,
-        request.shadowSpecSnapshot,
-        request.shadowSpecSessionId
-      );
+      try {
+        await recordApiRequest(
+          capturePool,
+          request.method,
+          request.url.split("?")[0],
+          request.body ?? null,
+          request.params as Record<
+            string,
+            string
+          >,
+          request.query as Record<
+            string,
+            string
+          >,
+          reply.statusCode,
+          responseBody,
+          request.shadowSpecSnapshot,
+          request.shadowSpecSessionId
+        );
+      } catch (error) {
+        request.log.error(
+          getCaptureErrorDetails(error),
+          "ShadowSpec recorder write failed; response will be sent unchanged."
+        );
+      }
 
       return payload;
     }
