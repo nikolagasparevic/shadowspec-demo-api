@@ -15,8 +15,7 @@ const DEFAULT_SENSITIVE_FIELDS = [
   "creditCard",
   "credit_card",
   "cvv",
-  "ssn",
-  "orderId"
+  "ssn"
 ];
 
 function getSensitiveFields(): Set<string> {

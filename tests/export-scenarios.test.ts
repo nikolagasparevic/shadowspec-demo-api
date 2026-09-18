@@ -51,81 +51,81 @@ describe("findBestBaselineResponse", () => {
   });
 });
 
-  it("falls back to the first response when no valid snapshot exists", () => {
-    const responses = [
-      {
-        body: {
-          orderId: 1
-        },
-        status: 201,
-        snapshot: {
-          tables: {}
-        }
+it("falls back to the first response when no valid snapshot exists", () => {
+  const responses = [
+    {
+      body: {
+        orderId: 1
       },
-      {
-        body: {
-          orderId: 2
-        },
-        status: 201,
-        snapshot: {
-          tables: {}
-        }
+      status: 201,
+      snapshot: {
+        tables: {}
       }
-    ];
-
-    expect(
-      findBestBaselineResponse(
-        responses
-      )
-    ).toBe(responses[0]);
-  });
-
-  it("prefers the first valid snapshot", () => {
-    const responses = [
-      {
-        body: {
-          orderId: 1
-        },
-        status: 201
+    },
+    {
+      body: {
+        orderId: 2
       },
-      {
-        body: {
-          orderId: 2
-        },
-        status: 201,
-        snapshot: {
-          tables: {
-            orders: {
-              rows: []
-            }
-          }
-        }
+      status: 201,
+      snapshot: {
+        tables: {}
+      }
+    }
+  ];
+
+  expect(
+    findBestBaselineResponse(
+      responses
+    )
+  ).toBe(responses[0]);
+});
+
+it("prefers the first valid snapshot", () => {
+  const responses = [
+    {
+      body: {
+        orderId: 1
       },
-      {
-        body: {
-          orderId: 3
-        },
-        status: 201,
-        snapshot: {
-          tables: {
-            orders: {
-              rows: [
-                {
-                  id: 3
-                }
-              ]
-            }
+      status: 201
+    },
+    {
+      body: {
+        orderId: 2
+      },
+      status: 201,
+      snapshot: {
+        tables: {
+          orders: {
+            rows: []
           }
         }
       }
-    ];
+    },
+    {
+      body: {
+        orderId: 3
+      },
+      status: 201,
+      snapshot: {
+        tables: {
+          orders: {
+            rows: [
+              {
+                id: 3
+              }
+            ]
+          }
+        }
+      }
+    }
+  ];
 
-    expect(
-      findBestBaselineResponse(
-        responses
-      )
-    ).toBe(responses[1]);
-  });
+  expect(
+    findBestBaselineResponse(
+      responses
+    )
+  ).toBe(responses[1]);
+});
 
 describe("buildScenarios", () => {
   it("builds a scenario from a grouped response", () => {
@@ -165,12 +165,10 @@ describe("buildScenarios", () => {
         expected: {
           status: 200,
           body: {
+            orderId: 123,
             status: "created"
           }
-        },
-        dynamicFields: [
-          "orderId"
-        ]
+        }
       }
     ]);
   });
@@ -217,6 +215,7 @@ describe("buildScenarios", () => {
     expect(
       result[0].expected.body
     ).toEqual({
+      orderId: 1,
       quantity: 10,
       status: "shipped"
     });
@@ -238,7 +237,7 @@ describe("buildScenarios", () => {
     });
   });
 
-    it("sanitizes sensitive fields from the database snapshot", () => {
+  it("sanitizes sensitive fields from the database snapshot", () => {
     const result = buildScenarios([
       {
         id: 1,
@@ -352,7 +351,7 @@ describe("buildScenarios", () => {
       }
     });
   });
-    it("does not mark state-dependent fields as dynamic across different database snapshots", () => {
+  it("does not mark state-dependent fields as dynamic across different database snapshots", () => {
     const result = buildScenarios([
       {
         id: 1,
@@ -368,6 +367,7 @@ describe("buildScenarios", () => {
             body: {
               orderId: 2,
               customerId: 1234,
+
               productId: 9999,
               quantity: 2,
               status: "created"
@@ -418,9 +418,7 @@ describe("buildScenarios", () => {
       }
     ]);
 
-    expect(result[0].dynamicFields).toEqual([
-      "orderId"
-    ]);
+    expect(result[0].dynamicFields).toBeUndefined();
   });
 });
 
@@ -546,14 +544,12 @@ describe("buildLifecycleScenarios", () => {
             status: 201,
             body: {
               customerId: 1234,
+              orderId: 3,
               productId: 7777,
               quantity: 1,
               status: "created"
             }
-          },
-          dynamicFields: [
-            "orderId"
-          ]
+          }
         },
         {
           request: {
@@ -568,14 +564,12 @@ describe("buildLifecycleScenarios", () => {
             status: 200,
             body: {
               customerId: 1234,
+              orderId: 3,
               productId: 7777,
               quantity: 1,
               status: "created"
             }
           },
-          dynamicFields: [
-            "orderId"
-          ]
         }
       ]
     });

@@ -16,14 +16,12 @@
       "status": 200,
       "body": {
         "status": "shipped",
+        "orderId": 1,
         "quantity": 10,
         "productId": 5678,
         "customerId": 1234
       }
     },
-    "dynamicFields": [
-      "orderId"
-    ],
     "setup": {
       "tables": {
         "orders": {
@@ -68,14 +66,12 @@
       "status": 200,
       "body": {
         "status": "created",
+        "orderId": 2,
         "quantity": 5,
         "productId": 5555,
         "customerId": 4444
       }
     },
-    "dynamicFields": [
-      "orderId"
-    ],
     "setup": {
       "tables": {
         "orders": {
@@ -121,14 +117,12 @@
       "status": 201,
       "body": {
         "status": "created",
+        "orderId": 2,
         "quantity": 2,
         "productId": 9999,
         "customerId": 1234
       }
     },
-    "dynamicFields": [
-      "orderId"
-    ],
     "setup": {
       "tables": {
         "orders": {
@@ -159,14 +153,12 @@
       "status": 200,
       "body": {
         "status": "created",
+        "orderId": 2,
         "quantity": 2,
         "productId": 9999,
         "customerId": 1234
       }
     },
-    "dynamicFields": [
-      "orderId"
-    ],
     "setup": {
       "tables": {
         "orders": {
@@ -205,14 +197,12 @@
       "status": 201,
       "body": {
         "status": "created",
+        "orderId": 3,
         "quantity": 1,
         "productId": 7777,
         "customerId": 1234
       }
     },
-    "dynamicFields": [
-      "orderId"
-    ],
     "setup": {
       "tables": {
         "orders": {
@@ -250,14 +240,12 @@
       "status": 200,
       "body": {
         "status": "created",
+        "orderId": 3,
         "quantity": 1,
         "productId": 7777,
         "customerId": 1234
       }
     },
-    "dynamicFields": [
-      "orderId"
-    ],
     "setup": {
       "tables": {
         "orders": {
@@ -305,14 +293,12 @@
           "status": 201,
           "body": {
             "status": "created",
+            "orderId": 3,
             "quantity": 1,
             "productId": 7777,
             "customerId": 1234
           }
-        },
-        "dynamicFields": [
-          "orderId"
-        ]
+        }
       },
       {
         "request": {
@@ -327,14 +313,12 @@
           "status": 200,
           "body": {
             "status": "created",
+            "orderId": 3,
             "quantity": 1,
             "productId": 7777,
             "customerId": 1234
           }
-        },
-        "dynamicFields": [
-          "orderId"
-        ]
+        }
       }
     ],
     "setup": {
