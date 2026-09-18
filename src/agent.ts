@@ -1,6 +1,7 @@
 import type {
   FastifyInstance
 } from "fastify";
+import type { Pool } from "pg";
 import type {
   DatabaseSnapshot
 } from "./db-snapshot";
@@ -20,31 +21,61 @@ declare module "fastify" {
   }
 }
 
-export async function registerShadowSpecAgent(
-  app: FastifyInstance
-) {
+export type ShadowSpecOptions = {
+  applicationPool: Pool;
+  capturePool?: Pool;
+  tables?: readonly string[];
+  enabled?: boolean;
+};
+
+function getConfiguredTables(): string[] {
+  return (
+    process.env.SHADOWSPEC_TABLES ?? ""
+  )
+    .split(",")
+    .map((table) => table.trim())
+    .filter(Boolean);
+}
+
+export function registerShadowSpec(
+  app: FastifyInstance,
+  options: ShadowSpecOptions
+): void {
   const enabled =
+    options.enabled ??
     process.env.SHADOWSPEC_CAPTURE === "true";
 
   if (!enabled) {
     return;
   }
 
-app.decorateRequest(
-  "shadowSpecSnapshot",
-  undefined
-);
+  const applicationPool =
+    options.applicationPool;
+  const capturePool =
+    options.capturePool ?? applicationPool;
+  const tables = [
+    ...(options.tables ??
+      getConfiguredTables())
+  ];
 
-app.decorateRequest(
-  "shadowSpecSessionId",
-  undefined
-);
+  app.decorateRequest(
+    "shadowSpecSnapshot",
+    undefined
+  );
+
+  app.decorateRequest(
+    "shadowSpecSessionId",
+    undefined
+  );
 
   app.addHook(
     "preHandler",
     async (request) => {
       const snapshot =
-        await captureDatabaseSnapshot();
+        await captureDatabaseSnapshot(
+          applicationPool,
+          tables
+        );
 
       const sessionId =
         request.headers[
@@ -91,6 +122,7 @@ app.decorateRequest(
       }
 
       await recordApiRequest(
+        capturePool,
         request.method,
         request.url.split("?")[0],
         request.body ?? null,

@@ -1,7 +1,8 @@
-import { pool } from "./db";
+import type { Pool } from "pg";
 import type { DatabaseSnapshot } from "./db-snapshot";
 
 export async function recordApiRequest(
+  capturePool: Pool,
   method: string,
   path: string,
   requestBody: unknown,
@@ -12,7 +13,7 @@ export async function recordApiRequest(
   snapshot: DatabaseSnapshot,
   sessionId?: string
 ) {
-  const client = await pool.connect();
+  const client = await capturePool.connect();
 
   try {
     await client.query("BEGIN");

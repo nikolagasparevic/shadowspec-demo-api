@@ -5,21 +5,20 @@ import {
   it,
   vi
 } from "vitest";
+import type { Pool } from "pg";
 
 const { queryMock } =
   vi.hoisted(() => ({
     queryMock: vi.fn()
   }));
 
-vi.mock("../src/db", () => ({
-  pool: {
-    query: queryMock
-  }
-}));
-
 import {
   captureDatabaseSnapshot
 } from "../src/db-snapshot";
+
+const applicationPool = {
+  query: queryMock
+} as unknown as Pool;
 
 describe(
   "captureDatabaseSnapshot",
@@ -33,7 +32,10 @@ describe(
       "returns an empty snapshot when no tables are configured",
       async () => {
         const snapshot =
-          await captureDatabaseSnapshot();
+          await captureDatabaseSnapshot(
+            applicationPool,
+            []
+          );
 
         expect(snapshot).toEqual({
           tables: {}
@@ -48,9 +50,6 @@ describe(
     it(
       "captures only configured tables",
       async () => {
-        process.env.SHADOWSPEC_TABLES =
-          "orders, customers";
-
         queryMock
           .mockResolvedValueOnce({
             rows: [
@@ -70,7 +69,10 @@ describe(
           });
 
         const snapshot =
-          await captureDatabaseSnapshot();
+          await captureDatabaseSnapshot(
+            applicationPool,
+            ["orders", "customers"]
+          );
 
         expect(
           queryMock

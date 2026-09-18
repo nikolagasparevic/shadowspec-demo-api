@@ -1,4 +1,4 @@
-import { pool } from "./db";
+import type { Pool } from "pg";
 
 export type DatabaseSnapshot = {
   tables: Record<
@@ -8,16 +8,6 @@ export type DatabaseSnapshot = {
     }
   >;
 };
-
-function getConfiguredTables(): string[] {
-  const value =
-    process.env.SHADOWSPEC_TABLES || "";
-
-  return value
-    .split(",")
-    .map((table) => table.trim())
-    .filter(Boolean);
-}
 
 function validateIdentifier(
   value: string
@@ -29,9 +19,10 @@ function validateIdentifier(
   }
 }
 
-export async function captureDatabaseSnapshot(): Promise<DatabaseSnapshot> {
-  const tables = getConfiguredTables();
-
+export async function captureDatabaseSnapshot(
+  applicationPool: Pool,
+  tables: readonly string[]
+): Promise<DatabaseSnapshot> {
   const snapshot: DatabaseSnapshot = {
     tables: {}
   };
@@ -39,7 +30,7 @@ export async function captureDatabaseSnapshot(): Promise<DatabaseSnapshot> {
   for (const tableName of tables) {
     validateIdentifier(tableName);
 
-    const result = await pool.query(
+    const result = await applicationPool.query(
       `SELECT * FROM "${tableName}"`
     );
 

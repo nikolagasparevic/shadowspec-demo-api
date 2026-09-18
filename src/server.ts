@@ -1,12 +1,14 @@
 import Fastify from "fastify";
 import { pool } from "./db";
-import { registerShadowSpecAgent } from "./agent";
+import { registerShadowSpec } from "./index";
 
 const app = Fastify({
   logger: true
 });
 
-registerShadowSpecAgent(app);
+registerShadowSpec(app, {
+  applicationPool: pool
+});
 
 app.get("/", async () => {
   return {
