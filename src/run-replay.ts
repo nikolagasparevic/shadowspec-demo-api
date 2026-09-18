@@ -4,6 +4,12 @@ import { replayRequest } from "./replay";
 import { compareResponses } from "./compare";
 import { createReport } from "./report";
 import { applyReplaySetup } from "./setup-replay";
+import {
+  captureBindings,
+  resolveBindingReferences,
+  resolvePathParams,
+  type BindingStore
+} from "./lifecycle-bindings";
 
 async function main() {
   let passed = 0;
@@ -39,6 +45,9 @@ async function main() {
       }
     ];
 
+    const bindings: BindingStore =
+      new Map();
+
     for (const [stepIndex, step] of steps.entries()) {
       const isLifecycle =
         scenario.steps !== undefined;
@@ -52,23 +61,50 @@ async function main() {
       console.log("Original:");
       console.log(step);
 
+      const resolvedPathParams =
+        isLifecycle
+          ? resolvePathParams(
+              step.request.pathParams ?? {},
+              bindings
+            )
+          : (step.request.pathParams as
+              | Record<string, string>
+              | undefined) ?? {};
+
       const result = await replayRequest(
         step.request.method,
         step.request.path,
         step.request.body,
-        step.request.pathParams ?? {},
+        resolvedPathParams,
         step.request.queryParams ?? {}
       );
 
       console.log("Replay:");
       console.log(result);
 
+      const capturePointers =
+        isLifecycle && step.capture
+          ? captureBindings(
+              step.capture,
+              result.body,
+              bindings
+            )
+          : [];
+
+      const expectedBody = isLifecycle
+        ? resolveBindingReferences(
+            step.expected.body,
+            bindings
+          )
+        : step.expected.body;
+
       const comparison = compareResponses(
-        step.expected.body,
+        expectedBody,
         result.body,
         step.expected.status,
         result.status,
-        step.dynamicFields ?? []
+        step.dynamicFields ?? [],
+        capturePointers
       );
 
       console.log("Comparison:");

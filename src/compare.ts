@@ -1,3 +1,5 @@
+import { omitJsonPointers } from "./lifecycle-bindings";
+
 function sortObjectKeys(obj: any): any {
   if (Array.isArray(obj)) {
     return obj.map(sortObjectKeys);
@@ -62,15 +64,22 @@ export function compareResponses(
   replay: any,
   originalStatus: number,
   replayStatus: number,
-  dynamicFields: string[] = []
+  dynamicFields: string[] = [],
+  ignoredPointers: string[] = []
 ) {
   const normalizedOriginal = normalizeResponse(
-    original,
+    omitJsonPointers(
+      original,
+      ignoredPointers
+    ),
     dynamicFields
   );
 
   const normalizedReplay = normalizeResponse(
-    replay,
+    omitJsonPointers(
+      replay,
+      ignoredPointers
+    ),
     dynamicFields
   );
 

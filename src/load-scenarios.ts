@@ -5,8 +5,26 @@ export type ShadowSpecRequest = {
   method: string;
   path: string;
   body: unknown;
-  pathParams?: Record<string, string>;
+  pathParams?: Record<
+    string,
+    string | BindingReference
+  >;
   queryParams?: Record<string, string>;
+};
+
+export type BindingReference = {
+  $ref: string;
+};
+
+export type CapturePrimitiveType =
+  | "string"
+  | "number"
+  | "boolean";
+
+export type CaptureDefinition = {
+  from: "response.body";
+  pointer: string;
+  type: CapturePrimitiveType;
 };
 
 export type ShadowSpecExpected = {
@@ -18,6 +36,10 @@ export type ShadowSpecStep = {
   request: ShadowSpecRequest;
   expected: ShadowSpecExpected;
   dynamicFields?: string[];
+  capture?: Record<
+    string,
+    CaptureDefinition
+  >;
 };
 
 export type ShadowSpecScenario = {
