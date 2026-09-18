@@ -2,39 +2,72 @@ import fs from "fs";
 import { loadScenarios } from "./load-scenarios";
 import { replayRequest } from "./replay";
 import { compareResponses } from "./compare";
-import { createReport } from "./report";
+import {
+  createReport,
+  type ShadowSpecReport
+} from "./report";
 import { applyReplaySetup } from "./setup-replay";
 import {
   captureBindings,
+  LifecycleBindingError,
   resolveBindingReferences,
   resolvePathParams,
   type BindingStore
 } from "./lifecycle-bindings";
 
-async function main() {
+export type ReplayDependencies = {
+  loadScenarios: typeof loadScenarios;
+  replayRequest: typeof replayRequest;
+  applyReplaySetup: typeof applyReplaySetup;
+  writeReportFile: (
+    path: string,
+    contents: string
+  ) => void;
+  log: (...values: unknown[]) => void;
+};
+
+const defaultDependencies:
+  ReplayDependencies = {
+  loadScenarios,
+  replayRequest,
+  applyReplaySetup,
+  writeReportFile: (path, contents) => {
+    fs.writeFileSync(path, contents);
+  },
+  log: (...values) => {
+    console.log(...values);
+  }
+};
+
+export async function runReplay(
+  overrides: Partial<ReplayDependencies> = {}
+) {
+  const dependencies: ReplayDependencies = {
+    ...defaultDependencies,
+    ...overrides
+  };
   let passed = 0;
   let failed = 0;
 
-  const failures: {
-    scenario: number;
-    step?: number;
-    method: string;
-    path: string;
-    queryParams: Record<string, string>;
-    differences: any[];
-  }[] = [];
+  const failures:
+    ShadowSpecReport["failures"] = [];
 
-  const scenarios = loadScenarios();
+  const scenarios =
+    dependencies.loadScenarios();
 
   if (scenarios.length === 0) {
-    console.log("No scenarios found.");
+    dependencies.log("No scenarios found.");
     return;
   }
 
   for (const [index, scenario] of scenarios.entries()) {
-    console.log(`\n=== Scenario ${index + 1} ===`);
+    dependencies.log(
+      `\n=== Scenario ${index + 1} ===`
+    );
 
-    await applyReplaySetup(scenario.setup);
+    await dependencies.applyReplaySetup(
+      scenario.setup
+    );
 
     const steps = scenario.steps ?? [
       {
@@ -53,92 +86,127 @@ async function main() {
         scenario.steps !== undefined;
 
       if (isLifecycle) {
-        console.log(
+        dependencies.log(
           `\n--- Step ${stepIndex + 1} ---`
         );
       }
 
-      console.log("Original:");
-      console.log(step);
+      dependencies.log("Original:");
+      dependencies.log(step);
 
-      const resolvedPathParams =
-        isLifecycle
-          ? resolvePathParams(
-              step.request.pathParams ?? {},
+      try {
+        const resolvedPathParams =
+          isLifecycle
+            ? resolvePathParams(
+                step.request.pathParams ?? {},
+                bindings
+              )
+            : (step.request.pathParams as
+                | Record<string, string>
+                | undefined) ?? {};
+
+        const result =
+          await dependencies.replayRequest(
+            step.request.method,
+            step.request.path,
+            step.request.body,
+            resolvedPathParams,
+            step.request.queryParams ?? {}
+          );
+
+        dependencies.log("Replay:");
+        dependencies.log(result);
+
+        const capturePointers =
+          isLifecycle && step.capture
+            ? captureBindings(
+                step.capture,
+                result.body,
+                bindings
+              )
+            : [];
+
+        const expectedBody = isLifecycle
+          ? resolveBindingReferences(
+              step.expected.body,
               bindings
             )
-          : (step.request.pathParams as
-              | Record<string, string>
-              | undefined) ?? {};
+          : step.expected.body;
 
-      const result = await replayRequest(
-        step.request.method,
-        step.request.path,
-        step.request.body,
-        resolvedPathParams,
-        step.request.queryParams ?? {}
-      );
+        const comparison = compareResponses(
+          expectedBody,
+          result.body,
+          step.expected.status,
+          result.status,
+          step.dynamicFields ?? [],
+          capturePointers
+        );
 
-      console.log("Replay:");
-      console.log(result);
+        dependencies.log("Comparison:");
+        dependencies.log(comparison);
 
-      const capturePointers =
-        isLifecycle && step.capture
-          ? captureBindings(
-              step.capture,
-              result.body,
-              bindings
-            )
-          : [];
+        if (comparison.passed) {
+          passed++;
+        } else {
+          failed++;
 
-      const expectedBody = isLifecycle
-        ? resolveBindingReferences(
-            step.expected.body,
-            bindings
-          )
-        : step.expected.body;
+          failures.push({
+            scenario: index + 1,
+            step: isLifecycle
+              ? stepIndex + 1
+              : undefined,
+            method: step.request.method,
+            path: step.request.path,
+            queryParams:
+              step.request.queryParams ?? {},
+            differences: comparison.differences
+          });
+        }
+      } catch (error) {
+        if (
+          !isLifecycle ||
+          !(error instanceof LifecycleBindingError)
+        ) {
+          throw error;
+        }
 
-      const comparison = compareResponses(
-        expectedBody,
-        result.body,
-        step.expected.status,
-        result.status,
-        step.dynamicFields ?? [],
-        capturePointers
-      );
-
-      console.log("Comparison:");
-      console.log(comparison);
-
-      if (comparison.passed) {
-        passed++;
-      } else {
         failed++;
 
         failures.push({
           scenario: index + 1,
-          step: isLifecycle
-            ? stepIndex + 1
-            : undefined,
+          step: stepIndex + 1,
           method: step.request.method,
           path: step.request.path,
           queryParams:
             step.request.queryParams ?? {},
-          differences: comparison.differences
+          kind: "binding",
+          code: error.code,
+          message: error.message,
+          differences: []
         });
+
+        break;
       }
     }
   }
 
-  console.log("\n================================");
-  console.log("ShadowSpec Replay Summary");
-  console.log("================================");
-  console.log(`Checks:    ${passed + failed}`);
-  console.log(`Passed:    ${passed}`);
-  console.log(`Failed:    ${failed}`);
+  dependencies.log(
+    "\n================================"
+  );
+  dependencies.log(
+    "ShadowSpec Replay Summary"
+  );
+  dependencies.log(
+    "================================"
+  );
+  dependencies.log(
+    `Checks:    ${passed + failed}`
+  );
+  dependencies.log(`Passed:    ${passed}`);
+  dependencies.log(`Failed:    ${failed}`);
 
   if (failures.length > 0) {
-    console.log("\nFailures:");
+    dependencies.log("\nFailures:");
 
     for (const failure of failures) {
       const queryString = new URLSearchParams(
@@ -154,22 +222,31 @@ async function main() {
           ? ` / Step ${failure.step}`
           : "";
 
-      console.log(
+      dependencies.log(
         `\n❌ Scenario ${failure.scenario}${stepLabel}`
       );
 
-      console.log(
+      dependencies.log(
         `   ${failure.method} ${fullPath}`
       );
 
+      if (failure.kind === "binding") {
+        dependencies.log(
+          `\n   Binding ${failure.code}: ${failure.message}`
+        );
+        continue;
+      }
+
       for (const difference of failure.differences) {
-        console.log(`\n   ${difference.field}:`);
-        console.log(
+        dependencies.log(
+          `\n   ${difference.field}:`
+        );
+        dependencies.log(
           `   Expected: ${JSON.stringify(
             difference.expected
           )}`
         );
-        console.log(
+        dependencies.log(
           `   Actual:   ${JSON.stringify(
             difference.actual
           )}`
@@ -178,23 +255,23 @@ async function main() {
     }
   }
 
-  console.log("================================");
+  dependencies.log("================================");
 
-const report = createReport(
-  scenarios.length,
-  passed + failed,
-  passed,
-  failed,
-  failures
-);
+  const report = createReport(
+    scenarios.length,
+    passed + failed,
+    passed,
+    failed,
+    failures
+  );
 
-  fs.writeFileSync(
+  dependencies.writeReportFile(
     "shadowspec-report.json",
     JSON.stringify(report, null, 2)
   );
 
-  console.log("\nShadowSpec Report:");
-  console.log(
+  dependencies.log("\nShadowSpec Report:");
+  dependencies.log(
     JSON.stringify(report, null, 2)
   );
 
@@ -205,7 +282,9 @@ const report = createReport(
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  runReplay().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

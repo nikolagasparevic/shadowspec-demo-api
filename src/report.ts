@@ -1,3 +1,7 @@
+import type {
+  BindingFailureCode
+} from "./lifecycle-bindings";
+
 export type ShadowSpecReport = {
   passed: boolean;
   scenarios: number;
@@ -10,6 +14,9 @@ export type ShadowSpecReport = {
     method: string;
     path: string;
     queryParams: Record<string, string>;
+    kind?: "binding";
+    code?: BindingFailureCode;
+    message?: string;
     differences: {
       field: string;
       expected: any;

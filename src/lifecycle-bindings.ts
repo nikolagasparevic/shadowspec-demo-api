@@ -13,11 +13,32 @@ export type BindingStore = Map<
   BindingValue
 >;
 
+export type BindingFailureCode =
+  | "UNRESOLVED_BINDING"
+  | "INVALID_PATH_PARAMETER_VALUE"
+  | "UNSUPPORTED_CAPTURE_SOURCE"
+  | "DUPLICATE_BINDING"
+  | "INVALID_JSON_POINTER"
+  | "CAPTURE_SOURCE_MISSING"
+  | "CAPTURE_TYPE_MISMATCH";
+
+export class LifecycleBindingError extends Error {
+  readonly name = "LifecycleBindingError";
+
+  constructor(
+    readonly code: BindingFailureCode,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 function decodePointerToken(
   token: string
 ): string {
   if (/~(?:[^01]|$)/.test(token)) {
-    throw new Error(
+    throw new LifecycleBindingError(
+      "INVALID_JSON_POINTER",
       `Invalid JSON Pointer token: ${token}`
     );
   }
@@ -35,7 +56,8 @@ function getPointerTokens(
   }
 
   if (!pointer.startsWith("/")) {
-    throw new Error(
+    throw new LifecycleBindingError(
+      "INVALID_JSON_POINTER",
       `Invalid JSON Pointer: ${pointer}`
     );
   }
@@ -100,13 +122,15 @@ export function captureBindings(
     if (
       definition.from !== "response.body"
     ) {
-      throw new Error(
+      throw new LifecycleBindingError(
+        "UNSUPPORTED_CAPTURE_SOURCE",
         `ShadowSpec capture "${name}" has unsupported source "${definition.from}".`
       );
     }
 
     if (bindings.has(name)) {
-      throw new Error(
+      throw new LifecycleBindingError(
+        "DUPLICATE_BINDING",
         `ShadowSpec binding "${name}" is already defined.`
       );
     }
@@ -117,7 +141,8 @@ export function captureBindings(
     );
 
     if (!extracted.found) {
-      throw new Error(
+      throw new LifecycleBindingError(
+        "CAPTURE_SOURCE_MISSING",
         `ShadowSpec capture "${name}" could not find response body pointer "${definition.pointer}".`
       );
     }
@@ -126,7 +151,8 @@ export function captureBindings(
       typeof extracted.value !==
       definition.type
     ) {
-      throw new Error(
+      throw new LifecycleBindingError(
+        "CAPTURE_TYPE_MISMATCH",
         `ShadowSpec capture "${name}" expected ${definition.type} at "${definition.pointer}", but received ${typeof extracted.value}.`
       );
     }
@@ -162,7 +188,8 @@ export function resolveBindingReferences(
 ): unknown {
   if (isBindingReference(value)) {
     if (!bindings.has(value.$ref)) {
-      throw new Error(
+      throw new LifecycleBindingError(
+        "UNRESOLVED_BINDING",
         `Unresolved ShadowSpec binding: "${value.$ref}".`
       );
     }
@@ -220,7 +247,8 @@ export function resolvePathParams(
           typeof resolved !== "number" &&
           typeof resolved !== "boolean"
         ) {
-          throw new Error(
+          throw new LifecycleBindingError(
+            "INVALID_PATH_PARAMETER_VALUE",
             `ShadowSpec path parameter "${key}" must resolve to a scalar value.`
           );
         }
