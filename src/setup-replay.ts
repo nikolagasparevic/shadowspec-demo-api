@@ -1,4 +1,10 @@
+import type { PoolClient } from "pg";
 import { pool } from "./db";
+import {
+  parseReplaySafetyConfig,
+  runReplayTransaction,
+  type ReplayPool
+} from "./replay-safety";
 
 export type ReplayRow = Record<string, unknown>;
 
@@ -13,9 +19,11 @@ export type ReplaySetup = {
   >;
 };
 
-function getConfiguredTables(): string[] {
+function getConfiguredTables(
+  environment: NodeJS.ProcessEnv = process.env
+): string[] {
   const value =
-    process.env.SHADOWSPEC_TABLES || "";
+    environment.SHADOWSPEC_TABLES || "";
   const seen = new Set<string>();
 
   return value
@@ -41,14 +49,14 @@ function validateIdentifier(
   }
 }
 
-export async function resetReplayDatabase() {
-  const tables =
-    getConfiguredTables();
-
+async function resetReplayDatabase(
+  client: PoolClient,
+  tables: readonly string[]
+) {
   for (const tableName of tables) {
     validateIdentifier(tableName);
 
-    await pool.query(
+    await client.query(
       `TRUNCATE TABLE "${tableName}"
        RESTART IDENTITY CASCADE`
     );
@@ -56,50 +64,60 @@ export async function resetReplayDatabase() {
 }
 
 export async function applyReplaySetup(
-  setup?: ReplaySetup
+  setup?: ReplaySetup,
+  replayPool: ReplayPool = pool,
+  environment: NodeJS.ProcessEnv = process.env
 ) {
-  await resetReplayDatabase();
+  const config = parseReplaySafetyConfig(environment);
+  const tables = getConfiguredTables(environment);
 
-  if (!setup?.tables) {
-    return;
-  }
+  await runReplayTransaction(
+    replayPool,
+    config,
+    false,
+    async (client) => {
+      await resetReplayDatabase(client, tables);
 
-  for (const tableName of getConfiguredTables()) {
-    const table = setup.tables[tableName];
-
-    if (!table) {
-      continue;
-    }
-
-    validateIdentifier(tableName);
-
-    for (const row of table.rows) {
-      const columns = Object.keys(row);
-
-      if (columns.length === 0) {
-        continue;
+      if (!setup?.tables) {
+        return;
       }
 
-      const values = columns.map(
-        (column) => row[column]
-      );
+      for (const tableName of tables) {
+        const table = setup.tables[tableName];
 
-      const placeholders = columns.map(
-        (_, index) => `$${index + 1}`
-      );
+        if (!table) {
+          continue;
+        }
 
-      await pool.query(
-        `INSERT INTO "${tableName}"
+        validateIdentifier(tableName);
+
+        for (const row of table.rows) {
+          const columns = Object.keys(row);
+
+          if (columns.length === 0) {
+            continue;
+          }
+
+          const values = columns.map(
+            (column) => row[column]
+          );
+
+          const placeholders = columns.map(
+            (_, index) => `$${index + 1}`
+          );
+
+          await client.query(
+            `INSERT INTO "${tableName}"
           (${columns.map(
             (column) => `"${column}"`
           ).join(", ")})
          VALUES (${placeholders.join(", ")})`,
-        values
-      );
-    }
+            values
+          );
+        }
 
-    await pool.query(
-      `DO $$
+        await client.query(
+          `DO $$
        DECLARE
          sequence_name text;
          max_id bigint;
@@ -124,6 +142,8 @@ export async function applyReplaySetup(
            END IF;
          END IF;
        END $$;`
-    );
-  }
+        );
+      }
+    }
+  );
 }

@@ -125,6 +125,12 @@ describe("package consumer", () => {
     expect(files).toContain(
       "sql/capture-schema.sql"
     );
+    expect(files).toContain(
+      "sql/replay-target-schema.sql"
+    );
+    expect(files).toContain(
+      "sql/authorize-replay-target.sql.example"
+    );
     expect(files).not.toContain("src/server.ts");
     expect(files).not.toContain("db/schema.sql");
     expect(

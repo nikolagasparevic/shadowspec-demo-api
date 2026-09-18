@@ -1,317 +1,340 @@
+import { createHash } from "node:crypto";
 import {
-  afterEach,
   describe,
   expect,
   it,
   vi
 } from "vitest";
+import type { PoolClient } from "pg";
+import { applyReplaySetup } from "../src/setup-replay";
+import type { ReplayPool } from "../src/replay-safety";
 
-const { queryMock } =
-  vi.hoisted(() => ({
-    queryMock: vi.fn()
-  }));
+const TOKEN = "0123456789abcdef0123456789abcdef";
+const PROJECT_ID =
+  "11111111-1111-4111-8111-111111111111";
+const DATABASE_ID =
+  "22222222-2222-4222-8222-222222222222";
+const DATABASE_NAME = "shadowspec_test_replay";
 
-vi.mock("../src/db", () => ({
-  pool: {
-    query: queryMock
-  }
-}));
+function environment(
+  tables = "parents,children"
+): NodeJS.ProcessEnv {
+  return {
+    SHADOWSPEC_REPLAY: "true",
+    SHADOWSPEC_PROJECT_ID: PROJECT_ID,
+    SHADOWSPEC_REPLAY_DATABASE_ID: DATABASE_ID,
+    SHADOWSPEC_REPLAY_TOKEN: TOKEN,
+    SHADOWSPEC_REPLAY_DATABASE_NAME:
+      DATABASE_NAME,
+    SHADOWSPEC_TABLES: tables
+  };
+}
 
-import {
-  applyReplaySetup,
-  resetReplayDatabase
-} from "../src/setup-replay";
+function marker() {
+  return {
+    marker_version: 1,
+    project_id: PROJECT_ID,
+    replay_database_id: DATABASE_ID,
+    database_name: DATABASE_NAME,
+    token_sha256: createHash("sha256")
+      .update(TOKEN)
+      .digest("hex")
+  };
+}
 
-describe(
-  "resetReplayDatabase",
-  () => {
-    afterEach(() => {
-      vi.clearAllMocks();
-      delete process.env.SHADOWSPEC_TABLES;
-    });
-
-    it(
-      "does nothing when no tables are configured",
-      async () => {
-        await resetReplayDatabase();
-
-        expect(
-          queryMock
-        ).not.toHaveBeenCalled();
+function harness(
+  failWhen?: (sql: string) => boolean
+) {
+  const query = vi.fn(
+    async (sql: string) => {
+      if (failWhen?.(sql)) {
+        throw new Error("injected setup failure");
       }
-    );
 
-    it(
-      "resets only configured tables",
-      async () => {
-        process.env.SHADOWSPEC_TABLES =
-          "orders, customers";
-
-        await resetReplayDatabase();
-
-        expect(
-          queryMock
-        ).toHaveBeenNthCalledWith(
-          1,
-          `TRUNCATE TABLE "orders"
-       RESTART IDENTITY CASCADE`
-        );
-
-        expect(
-          queryMock
-        ).toHaveBeenNthCalledWith(
-          2,
-          `TRUNCATE TABLE "customers"
-       RESTART IDENTITY CASCADE`
-        );
-
-        expect(
-          queryMock
-        ).toHaveBeenCalledTimes(2);
+      if (sql.includes("current_database()")) {
+        return {
+          rows: [{ database_name: DATABASE_NAME }]
+        };
       }
-    );
-  }
-);
 
-describe("applyReplaySetup", () => {
-  afterEach(() => {
-    vi.clearAllMocks();
-    delete process.env.SHADOWSPEC_TABLES;
-  });
+      if (
+        sql.includes(
+          "shadowspec_internal.replay_target"
+        )
+      ) {
+        return { rows: [marker()] };
+      }
 
-  it(
-    "restores tables in configured order",
-    async () => {
-      process.env.SHADOWSPEC_TABLES =
-        "parents,children";
+      return { rows: [] };
+    }
+  );
+  const release = vi.fn();
+  const client = {
+    query,
+    release
+  } as unknown as PoolClient;
+  const connect = vi.fn(async () => client);
+  const pool = {
+    connect
+  } as unknown as ReplayPool;
 
-      await applyReplaySetup({
+  return { pool, connect, query, release };
+}
+
+function sqlCalls(query: ReturnType<typeof vi.fn>) {
+  return query.mock.calls.map(
+    ([sql]) => sql as string
+  );
+}
+
+describe("guarded replay setup", () => {
+  it("uses configured order even when snapshot keys are reversed", async () => {
+    const test = harness();
+
+    await applyReplaySetup(
+      {
         tables: {
           children: {
             rows: [{ id: 2, parent_id: 1 }]
           },
-          parents: {
-            rows: [{ id: 1 }]
-          }
+          parents: { rows: [{ id: 1 }] }
         }
-      });
+      },
+      test.pool,
+      environment()
+    );
 
-      const insertQueries = queryMock.mock.calls
-        .map(([sql]) => sql as string)
-        .filter((sql) => sql.startsWith("INSERT"));
+    const inserts = sqlCalls(test.query).filter(
+      (sql) => sql.startsWith("INSERT")
+    );
+    expect(inserts).toEqual([
+      expect.stringContaining(
+        'INSERT INTO "parents"'
+      ),
+      expect.stringContaining(
+        'INSERT INTO "children"'
+      )
+    ]);
+  });
 
-      expect(insertQueries).toEqual([
-        expect.stringContaining(
-          'INSERT INTO "parents"'
-        ),
-        expect.stringContaining(
-          'INSERT INTO "children"'
-        )
-      ]);
-    }
-  );
+  it("ignores unconfigured setup tables", async () => {
+    const test = harness();
 
-  it(
-    "ignores unconfigured setup tables",
-    async () => {
-      process.env.SHADOWSPEC_TABLES = "parents";
-
-      await applyReplaySetup({
+    await applyReplaySetup(
+      {
         tables: {
           parents: { rows: [{ id: 1 }] },
           unrelated: { rows: [{ id: 99 }] }
         }
-      });
+      },
+      test.pool,
+      environment("parents")
+    );
 
-      const queries = queryMock.mock.calls.map(
-        ([sql]) => sql as string
-      );
+    expect(
+      sqlCalls(test.query).some((sql) =>
+        sql.includes("unrelated")
+      )
+    ).toBe(false);
+  });
 
-      expect(
-        queries.some((sql) =>
-          sql.includes("unrelated")
-        )
-      ).toBe(false);
-    }
-  );
+  it("deduplicates tables and ignores whitespace entries", async () => {
+    const test = harness();
 
-  it(
-    "deduplicates configured tables in first occurrence order",
-    async () => {
-      process.env.SHADOWSPEC_TABLES =
-        "parents, children, parents, , children";
+    await applyReplaySetup(
+      { tables: {} },
+      test.pool,
+      environment(
+        "parents, children, parents, , children"
+      )
+    );
 
-      await applyReplaySetup({
-        tables: {
-          children: { rows: [{ id: 2 }] },
-          parents: { rows: [{ id: 1 }] }
-        }
-      });
+    const truncates = sqlCalls(test.query).filter(
+      (sql) => sql.startsWith("TRUNCATE")
+    );
+    expect(truncates).toEqual([
+      expect.stringContaining(
+        'TRUNCATE TABLE "parents"'
+      ),
+      expect.stringContaining(
+        'TRUNCATE TABLE "children"'
+      )
+    ]);
+  });
 
-      const queries = queryMock.mock.calls.map(
-        ([sql]) => sql as string
-      );
-      const resetQueries = queries.filter((sql) =>
-        sql.startsWith("TRUNCATE")
-      );
-      const insertQueries = queries.filter((sql) =>
-        sql.startsWith("INSERT")
-      );
+  it("skips missing snapshots and repairs empty configured tables", async () => {
+    const test = harness();
 
-      expect(resetQueries).toEqual([
-        expect.stringContaining(
-          'TRUNCATE TABLE "parents"'
-        ),
-        expect.stringContaining(
-          'TRUNCATE TABLE "children"'
-        )
-      ]);
-      expect(insertQueries).toEqual([
-        expect.stringContaining(
-          'INSERT INTO "parents"'
-        ),
-        expect.stringContaining(
-          'INSERT INTO "children"'
-        )
-      ]);
-      expect(
-        queries.filter((sql) =>
-          sql.startsWith("DO $$")
-        )
-      ).toHaveLength(2);
-    }
-  );
-
-  it(
-    "ignores whitespace and empty configuration entries",
-    async () => {
-      process.env.SHADOWSPEC_TABLES =
-        " , parents, , children, ";
-
-      await applyReplaySetup({ tables: {} });
-
-      const resetQueries = queryMock.mock.calls
-        .map(([sql]) => sql as string)
-        .filter((sql) => sql.startsWith("TRUNCATE"));
-
-      expect(resetQueries).toEqual([
-        expect.stringContaining(
-          'TRUNCATE TABLE "parents"'
-        ),
-        expect.stringContaining(
-          'TRUNCATE TABLE "children"'
-        )
-      ]);
-    }
-  );
-
-  it(
-    "skips a configured table missing from setup",
-    async () => {
-      process.env.SHADOWSPEC_TABLES =
-        "parents,children";
-
-      await applyReplaySetup({
-        tables: {
-          children: { rows: [{ id: 2 }] }
-        }
-      });
-
-      const restoreQueries = queryMock.mock.calls
-        .map(([sql]) => sql as string)
-        .filter((sql) =>
-          !sql.startsWith("TRUNCATE")
-        );
-
-      expect(restoreQueries).toHaveLength(2);
-      expect(restoreQueries[0]).toContain(
-        'INSERT INTO "children"'
-      );
-      expect(restoreQueries[1]).toContain(
-        "'children'"
-      );
-    }
-  );
-
-  it(
-    "repairs the sequence for a configured empty table",
-    async () => {
-      process.env.SHADOWSPEC_TABLES = "parents";
-
-      await applyReplaySetup({
+    await applyReplaySetup(
+      {
         tables: {
           parents: { rows: [] }
         }
-      });
+      },
+      test.pool,
+      environment()
+    );
 
-      const queries = queryMock.mock.calls.map(
-        ([sql]) => sql as string
-      );
+    const calls = sqlCalls(test.query);
+    expect(
+      calls.filter((sql) =>
+        sql.includes("pg_get_serial_sequence")
+      )
+    ).toHaveLength(1);
+    expect(
+      calls.some((sql) =>
+        sql.includes("'children'")
+      )
+    ).toBe(false);
+  });
 
-      expect(queries).toHaveLength(2);
-      expect(queries[0]).toContain(
-        'TRUNCATE TABLE "parents"'
-      );
-      expect(queries[1]).toContain("'parents'");
-      expect(queries[1]).toContain("pg_get_serial_sequence");
-    }
-  );
+  it("preserves single-table reset, insert, and sequence repair", async () => {
+    const test = harness();
 
-  it(
-    "repairs a configured table sequence after its inserts",
-    async () => {
-      process.env.SHADOWSPEC_TABLES = "parents";
-
-      await applyReplaySetup({
-        tables: {
-          parents: {
-            rows: [{ id: 1 }, { id: 2 }]
-          }
-        }
-      });
-
-      const restoreQueries = queryMock.mock.calls
-        .map(([sql]) => sql as string)
-        .filter((sql) =>
-          !sql.startsWith("TRUNCATE")
-        );
-
-      expect(restoreQueries).toHaveLength(3);
-      expect(restoreQueries[0]).toContain(
-        'INSERT INTO "parents"'
-      );
-      expect(restoreQueries[1]).toContain(
-        'INSERT INTO "parents"'
-      );
-      expect(restoreQueries[2]).toContain(
-        "pg_get_serial_sequence"
-      );
-    }
-  );
-
-  it(
-    "preserves single-table replay setup behavior",
-    async () => {
-      process.env.SHADOWSPEC_TABLES = "orders";
-
-      await applyReplaySetup({
+    await applyReplaySetup(
+      {
         tables: {
           orders: { rows: [{ id: 1 }] }
         }
-      });
+      },
+      test.pool,
+      environment("orders")
+    );
 
-      const queries = queryMock.mock.calls.map(
-        ([sql]) => sql as string
-      );
+    const calls = sqlCalls(test.query);
+    expect(calls.filter((sql) =>
+      sql.startsWith("TRUNCATE")
+    )).toHaveLength(1);
+    expect(calls.filter((sql) =>
+      sql.startsWith("INSERT")
+    )).toHaveLength(1);
+    expect(calls.filter((sql) =>
+      sql.includes("pg_get_serial_sequence")
+    )).toHaveLength(1);
+  });
 
-      expect(queries).toHaveLength(3);
-      expect(queries[0]).toContain(
-        'TRUNCATE TABLE "orders"'
-      );
-      expect(queries[1]).toContain(
-        'INSERT INTO "orders"'
-      );
-      expect(queries[2]).toContain("'orders'");
-    }
-  );
+  it("verifies and mutates through one client in transaction order", async () => {
+    const test = harness();
+    const poolQuery = vi.fn();
+    const guardedPool = {
+      connect: test.connect,
+      query: poolQuery
+    } as unknown as ReplayPool;
+
+    await applyReplaySetup(
+      {
+        tables: {
+          parents: { rows: [{ id: 1 }] }
+        }
+      },
+      guardedPool,
+      environment("parents")
+    );
+
+    const calls = sqlCalls(test.query);
+    expect(calls[0]).toBe("BEGIN");
+    expect(calls[1]).toContain(
+      "current_database()"
+    );
+    expect(calls[2]).toContain("FOR SHARE");
+    expect(calls[3]).toContain("TRUNCATE");
+    expect(calls.at(-1)).toBe("COMMIT");
+    expect(poolQuery).not.toHaveBeenCalled();
+    expect(test.connect).toHaveBeenCalledOnce();
+    expect(test.release).toHaveBeenCalledWith(false);
+  });
+
+  it("rolls back a second-table failure and releases the client", async () => {
+    const test = harness((sql) =>
+      sql.startsWith('INSERT INTO "children"')
+    );
+
+    await expect(
+      applyReplaySetup(
+        {
+          tables: {
+            parents: { rows: [{ id: 1 }] },
+            children: { rows: [{ id: 2 }] }
+          }
+        },
+        test.pool,
+        environment()
+      )
+    ).rejects.toThrow("injected setup failure");
+
+    const calls = sqlCalls(test.query);
+    expect(calls).toContain("ROLLBACK");
+    expect(calls).not.toContain("COMMIT");
+    expect(test.release).toHaveBeenCalledWith(false);
+  });
+
+  it("rolls back sequence repair failure", async () => {
+    const test = harness((sql) =>
+      sql.includes("pg_get_serial_sequence")
+    );
+
+    await expect(
+      applyReplaySetup(
+        {
+          tables: {
+            parents: { rows: [{ id: 1 }] }
+          }
+        },
+        test.pool,
+        environment("parents")
+      )
+    ).rejects.toThrow("injected setup failure");
+
+    expect(sqlCalls(test.query)).toContain(
+      "ROLLBACK"
+    );
+  });
+
+  it("detects marker removal between scenarios before another mutation", async () => {
+    const test = harness();
+    let markerReads = 0;
+    test.query.mockImplementation(
+      async (sql: string) => {
+        if (sql.includes("current_database()")) {
+          return {
+            rows: [{ database_name: DATABASE_NAME }]
+          };
+        }
+        if (
+          sql.includes(
+            "shadowspec_internal.replay_target"
+          )
+        ) {
+          markerReads++;
+          return {
+            rows: markerReads === 1
+              ? [marker()]
+              : []
+          };
+        }
+        return { rows: [] };
+      }
+    );
+
+    await applyReplaySetup(
+      undefined,
+      test.pool,
+      environment("parents")
+    );
+    await expect(
+      applyReplaySetup(
+        undefined,
+        test.pool,
+        environment("parents")
+      )
+    ).rejects.toMatchObject({
+      code: "REPLAY_MARKER_ROW_MISSING"
+    });
+
+    expect(
+      sqlCalls(test.query).filter((sql) =>
+        sql.startsWith("TRUNCATE")
+      )
+    ).toHaveLength(1);
+  });
 });

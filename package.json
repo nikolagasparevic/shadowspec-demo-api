@@ -10,11 +10,15 @@
       "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./capture-schema.sql": "./sql/capture-schema.sql"
+    "./capture-schema.sql": "./sql/capture-schema.sql",
+    "./replay-target-schema.sql": "./sql/replay-target-schema.sql",
+    "./authorize-replay-target.sql.example": "./sql/authorize-replay-target.sql.example"
   },
   "files": [
     "dist",
-    "sql/capture-schema.sql"
+    "sql/capture-schema.sql",
+    "sql/replay-target-schema.sql",
+    "sql/authorize-replay-target.sql.example"
   ],
   "scripts": {
     "start": "tsx src/server.ts",

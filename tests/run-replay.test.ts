@@ -94,6 +94,9 @@ async function execute(
   const setupMock = vi.fn(
     async () => undefined
   );
+  const preflightMock = vi.fn(
+    async () => undefined
+  );
   const writes: {
     path: string;
     contents: string;
@@ -106,6 +109,7 @@ async function execute(
       loadScenarios: () => scenarios,
       replayRequest: replayMock,
       applyReplaySetup: setupMock,
+      preflightReplaySafety: preflightMock,
       writeReportFile: (
         path,
         contents
@@ -132,6 +136,7 @@ async function execute(
     report,
     replayMock,
     setupMock,
+    preflightMock,
     writes,
     logs
   };
@@ -150,6 +155,27 @@ function expectBindingFailure(
 }
 
 describe("structured lifecycle binding failures", () => {
+  it("performs no setup or HTTP request after startup safety refusal", async () => {
+    const safetyError = Object.assign(
+      new Error("Replay safety check failed."),
+      { code: "REPLAY_MARKER_ROW_MISSING" }
+    );
+    const result = await execute(
+      [standaloneScenario()],
+      [],
+      {
+        preflightReplaySafety: async () => {
+          throw safetyError;
+        }
+      }
+    );
+
+    expect(result.error).toBe(safetyError);
+    expect(result.setupMock).not.toHaveBeenCalled();
+    expect(result.replayMock).not.toHaveBeenCalled();
+    expect(result.writes).toHaveLength(0);
+  });
+
   it("records an unresolved path reference before HTTP", async () => {
     const result = await execute([
       lifecycleScenario([

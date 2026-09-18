@@ -76,6 +76,32 @@ jobs:
           docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec_replay < db/schema.sql
 
+      - name: Authorize ephemeral replay database
+        env:
+          SHADOWSPEC_PROJECT_ID: 8ef76468-72f9-4df4-a263-a4f88540e877
+        run: |
+          replay_token="$(openssl rand -hex 32)"
+          replay_token_hash="$(printf '%s' "$replay_token" | sha256sum | cut -d ' ' -f 1)"
+          replay_database_id="$(cat /proc/sys/kernel/random/uuid)"
+
+          echo "::add-mask::$replay_token"
+
+          docker compose exec -T postgres \
+            psql -U shadowspec -d shadowspec_replay < sql/replay-target-schema.sql
+
+          docker compose exec -T postgres \
+            psql -U shadowspec -d shadowspec_replay \
+            -v project_id="$SHADOWSPEC_PROJECT_ID" \
+            -v replay_database_id="$replay_database_id" \
+            -v database_name="shadowspec_replay" \
+            -v token_sha256="$replay_token_hash" \
+            < sql/authorize-replay-target.sql.example
+
+          echo "SHADOWSPEC_PROJECT_ID=$SHADOWSPEC_PROJECT_ID" >> "$GITHUB_ENV"
+          echo "SHADOWSPEC_REPLAY_DATABASE_ID=$replay_database_id" >> "$GITHUB_ENV"
+          echo "SHADOWSPEC_REPLAY_TOKEN=$replay_token" >> "$GITHUB_ENV"
+          echo "SHADOWSPEC_REPLAY_DATABASE_NAME=shadowspec_replay" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: npm install
 
@@ -84,6 +110,7 @@ jobs:
           DB_NAME: shadowspec_replay
           SHADOWSPEC_TARGET_URL: http://127.0.0.1:3000
           SHADOWSPEC_TABLES: orders
+          SHADOWSPEC_REPLAY: "true"
         run: |
           DB_NAME=shadowspec_replay npx tsx src/server.ts > target.log 2>&1 &
 

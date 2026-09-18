@@ -7,6 +7,7 @@ import {
   type ShadowSpecReport
 } from "./report";
 import { applyReplaySetup } from "./setup-replay";
+import { preflightReplaySafety } from "./replay-safety";
 import {
   captureBindings,
   LifecycleBindingError,
@@ -19,6 +20,7 @@ export type ReplayDependencies = {
   loadScenarios: typeof loadScenarios;
   replayRequest: typeof replayRequest;
   applyReplaySetup: typeof applyReplaySetup;
+  preflightReplaySafety: typeof preflightReplaySafety;
   writeReportFile: (
     path: string,
     contents: string
@@ -31,6 +33,7 @@ const defaultDependencies:
   loadScenarios,
   replayRequest,
   applyReplaySetup,
+  preflightReplaySafety,
   writeReportFile: (path, contents) => {
     fs.writeFileSync(path, contents);
   },
@@ -51,6 +54,8 @@ export async function runReplay(
 
   const failures:
     ShadowSpecReport["failures"] = [];
+
+  await dependencies.preflightReplaySafety();
 
   const scenarios =
     dependencies.loadScenarios();

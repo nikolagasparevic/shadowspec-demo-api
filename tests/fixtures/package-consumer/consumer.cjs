@@ -17,3 +17,10 @@ assert.match(
   ),
   /capture-schema\.sql$/
 );
+
+assert.match(
+  require.resolve(
+    "shadowspec/replay-target-schema.sql"
+  ),
+  /replay-target-schema\.sql$/
+);
