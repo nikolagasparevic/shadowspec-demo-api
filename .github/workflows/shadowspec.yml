@@ -120,103 +120,13 @@ jobs:
               fs.readFileSync("shadowspec-report.json", "utf8")
             );
 
+            const {
+              formatShadowSpecComment
+            } = require("./.github/scripts/format-shadowspec-comment.cjs");
+
             const marker = "<!-- shadowspec-report -->";
-
-            function formatRequest(failure) {
-              const queryParams = failure.queryParams || {};
-              const queryString = new URLSearchParams(
-                queryParams
-              ).toString();
-
-              return queryString
-                ? `${failure.method} ${failure.path}?${queryString}`
-                : `${failure.method} ${failure.path}`;
-            }
-
-            let body = `${marker}\n`;
-
-            if (report.passed) {
-              body += [
-                "## 🟢 ShadowSpec passed",
-                "",
-                `**${report.scenarios}** scenario${report.scenarios === 1 ? "" : "s"} checked.`,
-                "",
-                "No behavioral regressions detected.",
-                "",
-                "---",
-                "_ShadowSpec behavioral regression check_"
-              ].join("\n");
-            } else {
-              const regressionGroups = new Map();
-
-              for (const failure of report.failures) {
-                for (const difference of failure.differences) {
-                  const queryParams = failure.queryParams || {};
-
-                  const key = [
-                    failure.method,
-                    failure.path,
-                    JSON.stringify(queryParams),
-                    difference.field,
-                    JSON.stringify(difference.expected),
-                    JSON.stringify(difference.actual)
-                  ].join("|");
-
-                  const existing = regressionGroups.get(key);
-
-                  if (existing) {
-                    existing.scenarios.push(
-                      failure.scenario
-                    );
-                  } else {
-                    regressionGroups.set(key, {
-                      method: failure.method,
-                      path: failure.path,
-                      queryParams,
-                      field: difference.field,
-                      expected: difference.expected,
-                      actual: difference.actual,
-                      scenarios: [failure.scenario]
-                    });
-                  }
-                }
-              }
-
-              body += `## 🔴 ${regressionGroups.size} behavioral regression${regressionGroups.size === 1 ? "" : "s"} detected\n\n`;
-
-              for (const regression of regressionGroups.values()) {
-                body += `### \`${formatRequest(regression)}\`\n\n`;
-
-                body += `**${regression.field} changed**\n\n`;
-
-                body += "**Expected:**\n";
-                body += "```json\n";
-                body += JSON.stringify(
-                  regression.expected,
-                  null,
-                  2
-                );
-                body += "\n```\n\n";
-
-                body += "**Actual:**\n";
-                body += "```json\n";
-                body += JSON.stringify(
-                  regression.actual,
-                  null,
-                  2
-                );
-                body += "\n```\n\n";
-
-                if (regression.scenarios.length === 1) {
-                  body += `Scenario ID: **${regression.scenarios[0]}**\n\n`;
-                } else {
-                  body += `Scenario IDs: **${regression.scenarios.join(", ")}**\n\n`;
-                }
-              }
-
-              body += "---\n";
-              body += "_ShadowSpec behavioral regression check_";
-            }
+            const body =
+              formatShadowSpecComment(report);
 
             const comments =
               await github.rest.issues.listComments({
