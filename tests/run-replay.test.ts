@@ -241,6 +241,7 @@ describe("structured lifecycle binding failures", () => {
       result.report,
       "CAPTURE_TYPE_MISMATCH"
     );
+    expect(result.replayMock).toHaveBeenCalledOnce();
   });
 
   it("records duplicate bindings", async () => {
@@ -298,6 +299,7 @@ describe("structured lifecycle binding failures", () => {
       passedChecks: 1,
       failedChecks: 1
     });
+    expect(result.replayMock).toHaveBeenCalledOnce();
   });
 
   it("records unsupported capture sources", async () => {
@@ -329,6 +331,7 @@ describe("structured lifecycle binding failures", () => {
       result.report,
       "UNSUPPORTED_CAPTURE_SOURCE"
     );
+    expect(result.replayMock).not.toHaveBeenCalled();
   });
 
   it("records invalid JSON Pointers", async () => {
@@ -358,6 +361,7 @@ describe("structured lifecycle binding failures", () => {
       result.report,
       "INVALID_JSON_POINTER"
     );
+    expect(result.replayMock).not.toHaveBeenCalled();
   });
 
   it("records unresolved expected-body references", async () => {
@@ -388,7 +392,110 @@ describe("structured lifecycle binding failures", () => {
       result.report,
       "UNRESOLVED_BINDING"
     );
+    expect(result.replayMock).not.toHaveBeenCalled();
+  });
+
+  it("executes a same-step capture used by the expected body", async () => {
+    const result = await execute(
+      [
+        lifecycleScenario([
+          step({
+            expected: {
+              status: 200,
+              body: {
+                orderId: { $ref: "orderId" }
+              }
+            },
+            capture: {
+              orderId: {
+                from: "response.body",
+                pointer: "/orderId",
+                type: "number"
+              }
+            }
+          })
+        ])
+      ],
+      [
+        {
+          status: 200,
+          body: { orderId: 12 }
+        }
+      ]
+    );
+
+    expect(result.error).toBeUndefined();
     expect(result.replayMock).toHaveBeenCalledOnce();
+    expect(result.report).toMatchObject({
+      passed: true,
+      checks: 1,
+      passedChecks: 1,
+      failedChecks: 0
+    });
+  });
+
+  it("executes refs captured by a previous step", async () => {
+    const result = await execute(
+      [
+        lifecycleScenario([
+          step({
+            expected: {
+              status: 200,
+              body: { orderId: 100 }
+            },
+            capture: {
+              orderId: {
+                from: "response.body",
+                pointer: "/orderId",
+                type: "number"
+              }
+            }
+          }),
+          step({
+            request: {
+              method: "GET",
+              path: "/orders/:id",
+              body: null,
+              pathParams: {
+                id: { $ref: "orderId" }
+              }
+            },
+            expected: {
+              status: 200,
+              body: {
+                orderId: { $ref: "orderId" }
+              }
+            }
+          })
+        ])
+      ],
+      [
+        {
+          status: 200,
+          body: { orderId: 12 }
+        },
+        {
+          status: 200,
+          body: { orderId: 12 }
+        }
+      ]
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.replayMock).toHaveBeenCalledTimes(2);
+    expect(result.replayMock).toHaveBeenLastCalledWith(
+      "GET",
+      "/orders/:id",
+      null,
+      { id: "12" },
+      {}
+    );
+    expect(result.report).toMatchObject({
+      passed: true,
+      checks: 2,
+      passedChecks: 2,
+      failedChecks: 0
+    });
   });
 
   it("records invalid path parameter values", async () => {

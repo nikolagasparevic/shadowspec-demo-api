@@ -8,6 +8,7 @@ import {
 import { compareResponses } from "../src/compare";
 import {
   captureBindings,
+  preflightLifecycleBindings,
   resolveBindingReferences,
   resolvePathParams,
   type BindingStore
@@ -394,5 +395,179 @@ describe("lifecycle bindings", () => {
     ).toEqual({
       orderId: 3
     });
+  });
+
+  it("preflights expected refs to previous bindings", () => {
+    const bindings: BindingStore =
+      new Map([["orderId", 12]]);
+
+    expect(
+      preflightLifecycleBindings(
+        {},
+        {
+          orderId: { $ref: "orderId" }
+        },
+        undefined,
+        bindings
+      )
+    ).toEqual({});
+  });
+
+  it("preflights expected refs declared by same-step captures", () => {
+    const bindings: BindingStore =
+      new Map();
+
+    expect(
+      preflightLifecycleBindings(
+        {},
+        {
+          orderId: { $ref: "orderId" }
+        },
+        {
+          orderId: {
+            from: "response.body",
+            pointer: "/orderId",
+            type: "number"
+          }
+        },
+        bindings
+      )
+    ).toEqual({});
+
+    expect(bindings.size).toBe(0);
+  });
+
+  it("rejects unknown expected refs during preflight", () => {
+    expect(() =>
+      preflightLifecycleBindings(
+        {},
+        { id: { $ref: "missing" } },
+        undefined,
+        new Map()
+      )
+    ).toThrow(
+      'Unresolved ShadowSpec binding: "missing".'
+    );
+  });
+
+  it("rejects duplicate captures during preflight", () => {
+    expect(() =>
+      preflightLifecycleBindings(
+        {},
+        {},
+        {
+          orderId: {
+            from: "response.body",
+            pointer: "/orderId",
+            type: "number"
+          }
+        },
+        new Map([["orderId", 12]])
+      )
+    ).toThrow(
+      'ShadowSpec binding "orderId" is already defined.'
+    );
+  });
+
+  it("rejects unsupported capture sources during preflight", () => {
+    const definitions = {
+      orderId: {
+        from: "response.headers",
+        pointer: "/orderId",
+        type: "number"
+      }
+    } as unknown as Record<
+      string,
+      CaptureDefinition
+    >;
+
+    expect(() =>
+      preflightLifecycleBindings(
+        {},
+        {},
+        definitions,
+        new Map()
+      )
+    ).toThrow(
+      'ShadowSpec capture "orderId" has unsupported source "response.headers".'
+    );
+  });
+
+  it("rejects invalid capture pointers during preflight", () => {
+    expect(() =>
+      preflightLifecycleBindings(
+        {},
+        {},
+        {
+          orderId: {
+            from: "response.body",
+            pointer: "/invalid~2token",
+            type: "number"
+          }
+        },
+        new Map()
+      )
+    ).toThrow(
+      "Invalid JSON Pointer token: invalid~2token"
+    );
+  });
+
+  it("accepts root capture pointers during preflight", () => {
+    expect(
+      preflightLifecycleBindings(
+        {},
+        {},
+        {
+          value: {
+            from: "response.body",
+            pointer: "",
+            type: "string"
+          }
+        },
+        new Map()
+      )
+    ).toEqual({});
+  });
+
+  it("accepts escaped capture pointers during preflight", () => {
+    expect(
+      preflightLifecycleBindings(
+        {},
+        {},
+        {
+          value: {
+            from: "response.body",
+            pointer: "/a~1b/~0value",
+            type: "string"
+          }
+        },
+        new Map()
+      )
+    ).toEqual({});
+  });
+
+  it("does not modify bindings during preflight", () => {
+    const bindings: BindingStore =
+      new Map([["existing", 7]]);
+
+    preflightLifecycleBindings(
+      {},
+      {
+        previous: { $ref: "existing" },
+        current: { $ref: "newValue" }
+      },
+      {
+        newValue: {
+          from: "response.body",
+          pointer: "/newValue",
+          type: "number"
+        }
+      },
+      bindings
+    );
+
+    expect(
+      Array.from(bindings.entries())
+    ).toEqual([["existing", 7]]);
   });
 });

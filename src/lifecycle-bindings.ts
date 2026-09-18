@@ -68,6 +68,30 @@ function getPointerTokens(
     .map(decodePointerToken);
 }
 
+function validateCaptureDefinition(
+  name: string,
+  definition: CaptureDefinition,
+  bindings: BindingStore
+) {
+  if (
+    definition.from !== "response.body"
+  ) {
+    throw new LifecycleBindingError(
+      "UNSUPPORTED_CAPTURE_SOURCE",
+      `ShadowSpec capture "${name}" has unsupported source "${definition.from}".`
+    );
+  }
+
+  if (bindings.has(name)) {
+    throw new LifecycleBindingError(
+      "DUPLICATE_BINDING",
+      `ShadowSpec binding "${name}" is already defined.`
+    );
+  }
+
+  getPointerTokens(definition.pointer);
+}
+
 export function extractJsonPointer(
   value: unknown,
   pointer: string
@@ -119,21 +143,11 @@ export function captureBindings(
     name,
     definition
   ] of Object.entries(definitions)) {
-    if (
-      definition.from !== "response.body"
-    ) {
-      throw new LifecycleBindingError(
-        "UNSUPPORTED_CAPTURE_SOURCE",
-        `ShadowSpec capture "${name}" has unsupported source "${definition.from}".`
-      );
-    }
-
-    if (bindings.has(name)) {
-      throw new LifecycleBindingError(
-        "DUPLICATE_BINDING",
-        `ShadowSpec binding "${name}" is already defined.`
-      );
-    }
+    validateCaptureDefinition(
+      name,
+      definition,
+      bindings
+    );
 
     const extracted = extractJsonPointer(
       responseBody,
@@ -182,26 +196,30 @@ function isBindingReference(
   );
 }
 
-export function resolveBindingReferences(
+function unresolvedBinding(
+  name: string
+): never {
+  throw new LifecycleBindingError(
+    "UNRESOLVED_BINDING",
+    `Unresolved ShadowSpec binding: "${name}".`
+  );
+}
+
+function transformBindingReferences(
   value: unknown,
-  bindings: BindingStore
+  transform: (
+    reference: BindingReference
+  ) => unknown
 ): unknown {
   if (isBindingReference(value)) {
-    if (!bindings.has(value.$ref)) {
-      throw new LifecycleBindingError(
-        "UNRESOLVED_BINDING",
-        `Unresolved ShadowSpec binding: "${value.$ref}".`
-      );
-    }
-
-    return bindings.get(value.$ref);
+    return transform(value);
   }
 
   if (Array.isArray(value)) {
     return value.map((item) =>
-      resolveBindingReferences(
+      transformBindingReferences(
         item,
-        bindings
+        transform
       )
     );
   }
@@ -214,9 +232,9 @@ export function resolveBindingReferences(
       Object.entries(value).map(
         ([key, childValue]) => [
           key,
-          resolveBindingReferences(
+          transformBindingReferences(
             childValue,
-            bindings
+            transform
           )
         ]
       )
@@ -224,6 +242,24 @@ export function resolveBindingReferences(
   }
 
   return value;
+}
+
+export function resolveBindingReferences(
+  value: unknown,
+  bindings: BindingStore
+): unknown {
+  return transformBindingReferences(
+    value,
+    (reference) => {
+      if (!bindings.has(reference.$ref)) {
+        return unresolvedBinding(
+          reference.$ref
+        );
+      }
+
+      return bindings.get(reference.$ref);
+    }
+  );
 }
 
 export function resolvePathParams(
@@ -257,6 +293,62 @@ export function resolvePathParams(
       }
     )
   );
+}
+
+export function preflightLifecycleBindings(
+  pathParams: Record<
+    string,
+    string | BindingReference
+  >,
+  expectedBody: unknown,
+  captureDefinitions: Record<
+    string,
+    CaptureDefinition
+  > | undefined,
+  bindings: BindingStore
+): Record<string, string> {
+  const resolvedPathParams =
+    resolvePathParams(
+      pathParams,
+      bindings
+    );
+  const definitions =
+    captureDefinitions ?? {};
+
+  for (const [
+    name,
+    definition
+  ] of Object.entries(definitions)) {
+    validateCaptureDefinition(
+      name,
+      definition,
+      bindings
+    );
+  }
+
+  const availableBindings = new Set([
+    ...bindings.keys(),
+    ...Object.keys(definitions)
+  ]);
+
+  transformBindingReferences(
+    expectedBody,
+    (reference) => {
+      if (
+        !availableBindings.has(
+          reference.$ref
+        )
+      ) {
+        return unresolvedBinding(
+          reference.$ref
+        );
+      }
+
+      return reference;
+    }
+  );
+
+  return resolvedPathParams;
 }
 
 function omitJsonPointer(

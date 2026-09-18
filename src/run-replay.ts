@@ -10,8 +10,8 @@ import { applyReplaySetup } from "./setup-replay";
 import {
   captureBindings,
   LifecycleBindingError,
+  preflightLifecycleBindings,
   resolveBindingReferences,
-  resolvePathParams,
   type BindingStore
 } from "./lifecycle-bindings";
 
@@ -97,8 +97,10 @@ export async function runReplay(
       try {
         const resolvedPathParams =
           isLifecycle
-            ? resolvePathParams(
+            ? preflightLifecycleBindings(
                 step.request.pathParams ?? {},
+                step.expected.body,
+                step.capture,
                 bindings
               )
             : (step.request.pathParams as
