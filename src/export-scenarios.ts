@@ -12,6 +12,11 @@ import {
   isStateDerivedField
 } from "./state-derived";
 import type { ScenarioResponse } from "./scenario-types";
+import {
+  inferLifecycleBindings,
+  type InferenceLifecycleScenario,
+  type InferenceScenarioStep
+} from "./lifecycle-binding-inference";
 
 type ExportedScenarioRequest = {
   method: string;
@@ -21,14 +26,8 @@ type ExportedScenarioRequest = {
   queryParams?: Record<string, string>;
 };
 
-type ExportedScenarioStep = {
-  request: ExportedScenarioRequest;
-  expected: {
-    status: number;
-    body: unknown;
-  };
-  dynamicFields?: string[];
-};
+type ExportedScenarioStep =
+  InferenceScenarioStep;
 
 type ExportedScenario = {
   id: number;
@@ -41,11 +40,8 @@ type ExportedScenario = {
   setup?: unknown;
 };
 
-type ExportedLifecycleScenario = {
-  id: number;
-  steps: ExportedScenarioStep[];
-  setup?: unknown;
-};
+type ExportedLifecycleScenario =
+  InferenceLifecycleScenario;
 
 function getSanitizedFields(
   original: unknown,
@@ -283,12 +279,14 @@ export function buildLifecycleScenarios(
     typeof buildScenarioSequences
   >
 ) {
-  return sequences
-    .filter(
+  const lifecycleSequences =
+    sequences.filter(
       (sequence) =>
         sequence.requests.length > 1
-    )
-    .map((sequence, index) => {
+    );
+
+  const scenarios = lifecycleSequences.map(
+    (sequence, index) => {
       const firstRequest =
         sequence.requests[0];
 
@@ -360,7 +358,13 @@ export function buildLifecycleScenarios(
       }
 
       return outputScenario;
-    });
+    }
+  );
+
+  return inferLifecycleBindings(
+    lifecycleSequences,
+    scenarios
+  );
 }
 
 async function main() {
