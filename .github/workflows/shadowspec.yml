@@ -76,43 +76,43 @@ jobs:
           docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec_replay < db/schema.sql
 
-      - name: Authorize ephemeral replay database
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run ShadowSpec
         env:
           SHADOWSPEC_PROJECT_ID: 8ef76468-72f9-4df4-a263-a4f88540e877
         run: |
           replay_token="$(openssl rand -hex 32)"
-          replay_token_hash="$(printf '%s' "$replay_token" | sha256sum | cut -d ' ' -f 1)"
+          target_token="$(openssl rand -hex 32)"
           replay_database_id="$(cat /proc/sys/kernel/random/uuid)"
+          replay_target_id="$(cat /proc/sys/kernel/random/uuid)"
 
           echo "::add-mask::$replay_token"
+          echo "::add-mask::$target_token"
+
+          replay_token_hash="$(printf '%s' "$replay_token" | sha256sum | cut -d ' ' -f 1)"
 
           docker compose exec -T postgres \
-            psql -U shadowspec -d shadowspec_replay < sql/replay-target-schema.sql
+            psql -v ON_ERROR_STOP=1 -U shadowspec -d shadowspec_replay \
+            < sql/replay-target-schema.sql
 
           docker compose exec -T postgres \
-            psql -U shadowspec -d shadowspec_replay \
+            psql -v ON_ERROR_STOP=1 -U shadowspec -d shadowspec_replay \
             -v project_id="$SHADOWSPEC_PROJECT_ID" \
             -v replay_database_id="$replay_database_id" \
             -v database_name="shadowspec_replay" \
             -v token_sha256="$replay_token_hash" \
             < sql/authorize-replay-target.sql.example
 
-          echo "SHADOWSPEC_PROJECT_ID=$SHADOWSPEC_PROJECT_ID" >> "$GITHUB_ENV"
-          echo "SHADOWSPEC_REPLAY_DATABASE_ID=$replay_database_id" >> "$GITHUB_ENV"
-          echo "SHADOWSPEC_REPLAY_TOKEN=$replay_token" >> "$GITHUB_ENV"
-          echo "SHADOWSPEC_REPLAY_DATABASE_NAME=shadowspec_replay" >> "$GITHUB_ENV"
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run ShadowSpec
-        env:
-          DB_NAME: shadowspec_replay
-          SHADOWSPEC_TARGET_URL: http://127.0.0.1:3000
-          SHADOWSPEC_TABLES: orders
-          SHADOWSPEC_REPLAY: "true"
-        run: |
-          DB_NAME=shadowspec_replay npx tsx src/server.ts > target.log 2>&1 &
+          env \
+            DB_NAME=shadowspec_replay \
+            SHADOWSPEC_REPLAY_TARGET=true \
+            SHADOWSPEC_PROJECT_ID="$SHADOWSPEC_PROJECT_ID" \
+            SHADOWSPEC_REPLAY_DATABASE_ID="$replay_database_id" \
+            SHADOWSPEC_REPLAY_TARGET_ID="$replay_target_id" \
+            SHADOWSPEC_REPLAY_TARGET_TOKEN="$target_token" \
+            npx tsx src/server.ts > target.log 2>&1 &
 
           for i in {1..30}; do
             if curl -s http://127.0.0.1:3000/ > /dev/null; then
@@ -130,7 +130,18 @@ jobs:
             exit 1
           fi
 
-          npx tsx src/run-replay.ts
+          env \
+            DB_NAME=shadowspec_replay \
+            SHADOWSPEC_TARGET_URL=http://127.0.0.1:3000 \
+            SHADOWSPEC_TABLES=orders \
+            SHADOWSPEC_REPLAY=true \
+            SHADOWSPEC_PROJECT_ID="$SHADOWSPEC_PROJECT_ID" \
+            SHADOWSPEC_REPLAY_DATABASE_ID="$replay_database_id" \
+            SHADOWSPEC_REPLAY_DATABASE_NAME=shadowspec_replay \
+            SHADOWSPEC_REPLAY_TOKEN="$replay_token" \
+            SHADOWSPEC_REPLAY_TARGET_ID="$replay_target_id" \
+            SHADOWSPEC_REPLAY_TARGET_TOKEN="$target_token" \
+            npx tsx src/run-replay.ts
 
       - name: Comment ShadowSpec result on PR
         if: always() && github.event_name == 'pull_request'

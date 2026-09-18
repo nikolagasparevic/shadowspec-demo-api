@@ -1,3 +1,56 @@
+import {
+  ReplayTargetSafetyError,
+  verifyReplayTarget
+} from "./replay-target-safety";
+
+const INVALID_REQUEST_URL_MESSAGE =
+  "Scenario request URL is not confined to the verified replay target.";
+
+export function buildReplayTargetRequestUrl(
+  targetOrigin: string,
+  resolvedPath: string
+): string {
+  if (
+    !resolvedPath.startsWith("/") ||
+    resolvedPath.startsWith("//") ||
+    resolvedPath.startsWith("/@") ||
+    resolvedPath.includes("\\") ||
+    resolvedPath.includes("#")
+  ) {
+    throw new ReplayTargetSafetyError(
+      "REPLAY_TARGET_REQUEST_URL_INVALID",
+      INVALID_REQUEST_URL_MESSAGE
+    );
+  }
+
+  let target: URL;
+  let requestUrl: URL;
+
+  try {
+    target = new URL(targetOrigin);
+    requestUrl = new URL(resolvedPath, target);
+  } catch {
+    throw new ReplayTargetSafetyError(
+      "REPLAY_TARGET_REQUEST_URL_INVALID",
+      INVALID_REQUEST_URL_MESSAGE
+    );
+  }
+
+  if (
+    requestUrl.origin !== target.origin ||
+    requestUrl.username !== "" ||
+    requestUrl.password !== "" ||
+    requestUrl.hash !== ""
+  ) {
+    throw new ReplayTargetSafetyError(
+      "REPLAY_TARGET_REQUEST_URL_INVALID",
+      INVALID_REQUEST_URL_MESSAGE
+    );
+  }
+
+  return requestUrl.href;
+}
+
 export async function replayRequest(
   method: string,
   path: string,
@@ -5,9 +58,8 @@ export async function replayRequest(
   pathParams: Record<string, string> = {},
   queryParams: Record<string, string> = {}
 ) {
-  const targetUrl =
-    process.env.SHADOWSPEC_TARGET_URL ||
-    "http://localhost:3001";
+  const { targetOrigin } =
+    await verifyReplayTarget();
 
   let resolvedPath = path;
 
@@ -35,7 +87,8 @@ export async function replayRequest(
   }
 
   const options: RequestInit = {
-    method
+    method,
+    redirect: "manual"
   };
 
   if (
@@ -51,7 +104,10 @@ export async function replayRequest(
   }
 
   const response = await fetch(
-    `${targetUrl}${resolvedPath}`,
+    buildReplayTargetRequestUrl(
+      targetOrigin,
+      resolvedPath
+    ),
     options
   );
 

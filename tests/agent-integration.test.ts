@@ -14,6 +14,8 @@ import {
 import * as publicApi from "../src/index";
 import {
   registerShadowSpec,
+  registerShadowSpecReplayTarget,
+  type ShadowSpecReplayTargetOptions,
   type ShadowSpecOptions
 } from "../src/index";
 
@@ -176,13 +178,81 @@ describe("public Fastify integration", () => {
   afterEach(() => {
     delete process.env.SHADOWSPEC_CAPTURE;
     delete process.env.SHADOWSPEC_TABLES;
+    delete process.env.SHADOWSPEC_REPLAY_TARGET;
+    delete process.env.SHADOWSPEC_PROJECT_ID;
+    delete process.env.SHADOWSPEC_REPLAY_DATABASE_ID;
+    delete process.env.SHADOWSPEC_REPLAY_TARGET_ID;
+    delete process.env.SHADOWSPEC_REPLAY_TARGET_TOKEN;
     vi.clearAllMocks();
   });
 
   it("exports only the public registration function at runtime", () => {
     expect(Object.keys(publicApi)).toEqual([
-      "registerShadowSpec"
+      "registerShadowSpec",
+      "registerShadowSpecReplayTarget"
     ]);
+  });
+
+  it("keeps capture and replay-target options independently usable", () => {
+    const database = createPool();
+    const captureOptions: ShadowSpecOptions = {
+      applicationPool: database.pool,
+      enabled: false
+    };
+    const targetOptions:
+      ShadowSpecReplayTargetOptions = {
+      enabled: false
+    };
+    const app = Fastify();
+
+    registerShadowSpec(app, captureOptions);
+    registerShadowSpecReplayTarget(
+      app,
+      targetOptions
+    );
+
+    expect(
+      app.hasRoute({
+        method: "POST",
+        url: "/__shadowspec/replay-target"
+      })
+    ).toBe(false);
+  });
+
+  it("does not capture replay-target handshake traffic", async () => {
+    const database = createPool();
+    const app = Fastify();
+    registerShadowSpec(app, {
+      applicationPool: database.pool,
+      enabled: true,
+      tables: ["books"]
+    });
+    registerShadowSpecReplayTarget(app, {
+      enabled: true,
+      projectId:
+        "11111111-1111-4111-8111-111111111111",
+      replayDatabaseId:
+        "22222222-2222-4222-8222-222222222222",
+      replayTargetId:
+        "33333333-3333-4333-8333-333333333333",
+      token:
+        "target-token-0123456789-abcdefghij"
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/__shadowspec/replay-target",
+      payload: {
+        protocolVersion: 1,
+        nonce:
+          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(database.query).not.toHaveBeenCalled();
+    expect(database.connect).not.toHaveBeenCalled();
+    await app.close();
   });
 
   it("lets explicit disabled state override the environment", async () => {

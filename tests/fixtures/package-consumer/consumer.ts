@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import { Pool } from "pg";
 import {
   registerShadowSpec,
+  registerShadowSpecReplayTarget,
+  type ShadowSpecReplayTargetOptions,
   type ShadowSpecOptions
 } from "shadowspec";
 
@@ -15,3 +17,13 @@ const options: ShadowSpecOptions = {
 };
 
 registerShadowSpec(app, options);
+
+const replayTargetOptions:
+  ShadowSpecReplayTargetOptions = {
+  enabled: false
+};
+
+registerShadowSpecReplayTarget(
+  app,
+  replayTargetOptions
+);

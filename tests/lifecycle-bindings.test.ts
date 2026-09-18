@@ -14,11 +14,17 @@ import {
   type BindingStore
 } from "../src/lifecycle-bindings";
 import { replayRequest } from "../src/replay";
+import { computeReplayTargetProof } from "../src/replay-target-protocol";
 import type { CaptureDefinition } from "../src/load-scenarios";
 
 describe("lifecycle bindings", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.SHADOWSPEC_TARGET_URL;
+    delete process.env.SHADOWSPEC_PROJECT_ID;
+    delete process.env.SHADOWSPEC_REPLAY_DATABASE_ID;
+    delete process.env.SHADOWSPEC_REPLAY_TARGET_ID;
+    delete process.env.SHADOWSPEC_REPLAY_TARGET_TOKEN;
   });
 
   it("allows a replay-generated value to differ on its capture step", () => {
@@ -78,12 +84,51 @@ describe("lifecycle bindings", () => {
   });
 
   it("sends the captured value in a later request path", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        orderId: 12
-      })
-    });
+    const projectId =
+      "11111111-1111-4111-8111-111111111111";
+    const databaseId =
+      "22222222-2222-4222-8222-222222222222";
+    const targetId =
+      "33333333-3333-4333-8333-333333333333";
+    const token =
+      "target-token-0123456789-abcdefghij";
+    process.env.SHADOWSPEC_TARGET_URL =
+      "http://localhost:3001";
+    process.env.SHADOWSPEC_PROJECT_ID = projectId;
+    process.env.SHADOWSPEC_REPLAY_DATABASE_ID =
+      databaseId;
+    process.env.SHADOWSPEC_REPLAY_TARGET_ID = targetId;
+    process.env.SHADOWSPEC_REPLAY_TARGET_TOKEN = token;
+    const fetchMock = vi.fn(
+      async (_url: string, options: RequestInit) => {
+        if (options.method === "POST") {
+          const challenge = JSON.parse(
+            options.body as string
+          ) as { nonce: string };
+          return new Response(
+            JSON.stringify({
+              protocolVersion: 1,
+              projectId,
+              replayDatabaseId: databaseId,
+              replayTargetId: targetId,
+              proof: computeReplayTargetProof(
+                token,
+                challenge.nonce,
+                projectId,
+                databaseId,
+                targetId
+              )
+            }),
+            { status: 200 }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({ orderId: 12 }),
+          { status: 200 }
+        );
+      }
+    );
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -103,12 +148,14 @@ describe("lifecycle bindings", () => {
       pathParams
     );
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenLastCalledWith(
       "http://localhost:3001/orders/12",
       {
-        method: "GET"
+        method: "GET",
+        redirect: "manual"
       }
     );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("compares a later response against the replay-generated value", () => {

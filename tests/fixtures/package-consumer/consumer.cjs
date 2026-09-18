@@ -3,12 +3,28 @@ const shadowspec = require("shadowspec");
 
 assert.deepEqual(
   Object.keys(shadowspec),
-  ["registerShadowSpec"]
+  [
+    "registerShadowSpec",
+    "registerShadowSpecReplayTarget"
+  ]
 );
 
 assert.equal(
   typeof shadowspec.registerShadowSpec,
   "function"
+);
+
+assert.equal(
+  typeof shadowspec.registerShadowSpecReplayTarget,
+  "function"
+);
+
+assert.throws(
+  () => require(
+    "shadowspec/dist/replay-target-protocol"
+  ),
+  (error) =>
+    error?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED"
 );
 
 assert.match(

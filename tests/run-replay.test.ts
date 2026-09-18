@@ -97,6 +97,9 @@ async function execute(
   const preflightMock = vi.fn(
     async () => undefined
   );
+  const targetVerificationMock = vi.fn(
+    async () => undefined
+  );
   const writes: {
     path: string;
     contents: string;
@@ -110,6 +113,8 @@ async function execute(
       replayRequest: replayMock,
       applyReplaySetup: setupMock,
       preflightReplaySafety: preflightMock,
+      verifyReplayTarget:
+        targetVerificationMock,
       writeReportFile: (
         path,
         contents
@@ -137,6 +142,7 @@ async function execute(
     replayMock,
     setupMock,
     preflightMock,
+    targetVerificationMock,
     writes,
     logs
   };
@@ -155,6 +161,49 @@ function expectBindingFailure(
 }
 
 describe("structured lifecycle binding failures", () => {
+  it("performs no setup or scenario request after startup target refusal", async () => {
+    const targetError = Object.assign(
+      new Error("Replay target refused."),
+      { code: "REPLAY_TARGET_PROOF_INVALID" }
+    );
+    const result = await execute(
+      [standaloneScenario()],
+      [],
+      {
+        verifyReplayTarget: async () => {
+          throw targetError;
+        }
+      }
+    );
+
+    expect(result.error).toBe(targetError);
+    expect(result.preflightMock).toHaveBeenCalledOnce();
+    expect(result.setupMock).not.toHaveBeenCalled();
+    expect(result.replayMock).not.toHaveBeenCalled();
+    expect(result.writes).toHaveLength(0);
+  });
+
+  it("performs no setup when per-scenario target verification fails", async () => {
+    const targetError = Object.assign(
+      new Error("Replay target changed."),
+      { code: "REPLAY_TARGET_ID_MISMATCH" }
+    );
+    const verify = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(targetError);
+    const result = await execute(
+      [standaloneScenario()],
+      [],
+      { verifyReplayTarget: verify }
+    );
+
+    expect(result.error).toBe(targetError);
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(result.setupMock).not.toHaveBeenCalled();
+    expect(result.replayMock).not.toHaveBeenCalled();
+    expect(result.writes).toHaveLength(0);
+  });
+
   it("performs no setup or HTTP request after startup safety refusal", async () => {
     const safetyError = Object.assign(
       new Error("Replay safety check failed."),

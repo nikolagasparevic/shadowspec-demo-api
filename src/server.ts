@@ -1,6 +1,9 @@
 import Fastify from "fastify";
 import { pool } from "./db";
-import { registerShadowSpec } from "./index";
+import {
+  registerShadowSpec,
+  registerShadowSpecReplayTarget
+} from "./index";
 
 const app = Fastify({
   logger: true
@@ -9,6 +12,8 @@ const app = Fastify({
 registerShadowSpec(app, {
   applicationPool: pool
 });
+
+registerShadowSpecReplayTarget(app);
 
 app.get("/", async () => {
   return {

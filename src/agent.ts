@@ -11,6 +11,7 @@ import {
 import {
   captureDatabaseSnapshot
 } from "./db-snapshot";
+import { REPLAY_TARGET_ENDPOINT } from "./replay-target-protocol";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -97,6 +98,13 @@ export function registerShadowSpec(
   app.addHook(
     "preHandler",
     async (request) => {
+      if (
+        request.url.split("?")[0] ===
+        REPLAY_TARGET_ENDPOINT
+      ) {
+        return;
+      }
+
       const sessionId =
         request.headers[
           "x-shadowspec-session-id"
