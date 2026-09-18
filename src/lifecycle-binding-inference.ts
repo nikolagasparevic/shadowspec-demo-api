@@ -46,6 +46,17 @@ type ScalarLeaf = {
   value: CandidateValue;
 };
 
+type SnapshotEvidence = {
+  table: string;
+  pointer: string;
+  snapshotValueType: "string" | "number";
+};
+
+type AddedRow = {
+  table: string;
+  row: Record<string, unknown>;
+};
+
 type FlowCandidate = {
   sequenceIndex: number;
   producerStep: number;
@@ -55,6 +66,7 @@ type FlowCandidate = {
   pathSegment: number;
   value: CandidateValue;
   valueType: "string" | "number";
+  snapshotEvidence: SnapshotEvidence;
   signature: string;
 };
 
@@ -282,11 +294,8 @@ function getNewRows(
   after: NonNullable<
     CapturedRequest["snapshot"]
   >
-): Record<string, unknown>[] {
-  const newRows: Record<
-    string,
-    unknown
-  >[] = [];
+): AddedRow[] {
+  const newRows: AddedRow[] = [];
 
   for (const [
     tableName,
@@ -338,18 +347,23 @@ function getNewRows(
       afterTable.rows.length -
         beforeRows.length
     ) {
-      newRows.push(...unmatchedRows);
+      newRows.push(
+        ...unmatchedRows.map((row) => ({
+          table: tableName,
+          row
+        }))
+      );
     }
   }
 
   return newRows;
 }
 
-function hasSnapshotEvidence(
+function getSnapshotEvidence(
   producer: CapturedRequest,
   consumer: CapturedRequest,
   candidate: CandidateValue
-): boolean {
+): SnapshotEvidence | undefined {
   if (
     !hasValidSnapshot(producer.snapshot) ||
     !hasValidSnapshot(consumer.snapshot) ||
@@ -358,15 +372,30 @@ function hasSnapshotEvidence(
       candidate
     )
   ) {
-    return false;
+    return undefined;
   }
 
-  return getNewRows(
+  const occurrences = getNewRows(
     producer.snapshot,
     consumer.snapshot
-  ).some((row) =>
-    containsCandidate(row, candidate)
+  ).flatMap(({ table, row }) =>
+    getScalarLeaves(row)
+      .filter((leaf) =>
+        valuesMatch(candidate, leaf.value)
+      )
+      .map((leaf) => ({
+        table,
+        pointer: leaf.pointer,
+        snapshotValueType:
+          typeof leaf.value as
+            | "string"
+            | "number"
+      }))
   );
+
+  return occurrences.length === 1
+    ? occurrences[0]
+    : undefined;
 }
 
 function normalizeSequence(
@@ -422,6 +451,8 @@ function normalizeSequence(
     pathParameter: candidate.pathParameter,
     pathSegment: candidate.pathSegment,
     valueType: candidate.valueType,
+    snapshotEvidence:
+      candidate.snapshotEvidence,
     requests: normalized
   });
 }
@@ -556,6 +587,12 @@ function findCandidates(
         consumer.responseBody,
         leaf.pointer
       );
+      const snapshotEvidence =
+        getSnapshotEvidence(
+          producer,
+          consumer,
+          leaf.value
+        );
 
       if (
         consumer.method !== "GET" ||
@@ -574,11 +611,7 @@ function findCandidates(
         typeof echoed.value !==
           typeof leaf.value ||
         echoed.value !== leaf.value ||
-        !hasSnapshotEvidence(
-          producer,
-          consumer,
-          leaf.value
-        )
+        snapshotEvidence === undefined
       ) {
         continue;
       }
@@ -594,7 +627,8 @@ function findCandidates(
         value: leaf.value,
         valueType: typeof leaf.value as
           | "string"
-          | "number"
+          | "number",
+        snapshotEvidence
       };
 
       candidates.push({

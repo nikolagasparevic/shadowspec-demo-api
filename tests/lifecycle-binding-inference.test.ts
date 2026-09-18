@@ -37,6 +37,35 @@ function snapshot(
   };
 }
 
+function snapshotTables(
+  tables: Record<
+    string,
+    Record<string, unknown>[]
+  >
+): DatabaseSnapshot {
+  return {
+    tables: Object.fromEntries(
+      Object.entries(tables).map(
+        ([table, rows]) => [
+          table,
+          { rows }
+        ]
+      )
+    )
+  };
+}
+
+function withSnapshots(
+  sequence: ScenarioSequence,
+  before: DatabaseSnapshot,
+  after: DatabaseSnapshot
+): ScenarioSequence {
+  sequence.requests[0].snapshot = before;
+  sequence.requests[1].snapshot = after;
+
+  return sequence;
+}
+
 function makeSequence(
   sessionId: string,
   value: unknown,
@@ -477,6 +506,300 @@ describe("lifecycle binding inference", () => {
       }),
       makeSequence("row-b", 202, {
         afterRows: unchangedRows
+      })
+    ]);
+  });
+
+  it("accepts multiple added rows when exactly one contains the candidate", () => {
+    const scenarios = buildLifecycleScenarios([
+      makeSequence("multiple-rows-a", 101, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: 101 },
+          { event: "unrelated" }
+        ]
+      }),
+      makeSequence("multiple-rows-b", 202, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: 202 },
+          { event: "unrelated" }
+        ]
+      })
+    ]);
+
+    expect(
+      scenarios.every(
+        (scenario) =>
+          scenario.steps[0].capture !==
+          undefined
+      )
+    ).toBe(true);
+  });
+
+  it("accepts reordered rows", () => {
+    const beforeRows = [
+      { key: "first" },
+      { key: "second" }
+    ];
+    const scenarios = buildLifecycleScenarios([
+      makeSequence("reordered-a", 101, {
+        beforeRows,
+        afterRows: [
+          { key: "second" },
+          { generated_value: 101 },
+          { key: "first" }
+        ]
+      }),
+      makeSequence("reordered-b", 202, {
+        beforeRows,
+        afterRows: [
+          { generated_value: 202 },
+          { key: "first" },
+          { key: "second" }
+        ]
+      })
+    ]);
+
+    expect(
+      scenarios.every(
+        (scenario) =>
+          scenario.steps[0].capture !==
+          undefined
+      )
+    ).toBe(true);
+  });
+
+  it("accepts API numbers stored consistently as database strings", () => {
+    const scenarios = buildLifecycleScenarios([
+      makeSequence("db-string-a", 101, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: "101" }
+        ]
+      }),
+      makeSequence("db-string-b", 202, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: "202" }
+        ]
+      })
+    ]);
+
+    expect(
+      scenarios.every(
+        (scenario) =>
+          scenario.steps[0].capture !==
+          undefined
+      )
+    ).toBe(true);
+  });
+
+  it("rejects candidates occurring in two added rows", () => {
+    expectLiteral([
+      makeSequence("two-rows-a", 101, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: 101 },
+          { copied_value: 101 }
+        ]
+      }),
+      makeSequence("two-rows-b", 202, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: 202 },
+          { copied_value: 202 }
+        ]
+      })
+    ]);
+  });
+
+  it("rejects candidates occurring in two different tables", () => {
+    const first = withSnapshots(
+      makeSequence("two-tables-a", 101),
+      snapshotTables({
+        resources: [{ key: "existing" }],
+        audit: [{ key: "existing" }]
+      }),
+      snapshotTables({
+        resources: [
+          { key: "existing" },
+          { generated_value: 101 }
+        ],
+        audit: [
+          { key: "existing" },
+          { observed_value: 101 }
+        ]
+      })
+    );
+    const second = withSnapshots(
+      makeSequence("two-tables-b", 202),
+      snapshotTables({
+        resources: [{ key: "existing" }],
+        audit: [{ key: "existing" }]
+      }),
+      snapshotTables({
+        resources: [
+          { key: "existing" },
+          { generated_value: 202 }
+        ],
+        audit: [
+          { key: "existing" },
+          { observed_value: 202 }
+        ]
+      })
+    );
+
+    expectLiteral([first, second]);
+  });
+
+  it("rejects equivalent sessions using different evidence tables", () => {
+    const first = withSnapshots(
+      makeSequence("table-source-a", 101),
+      snapshotTables({
+        resources: [{ key: "existing" }],
+        audit: [{ key: "existing" }]
+      }),
+      snapshotTables({
+        resources: [
+          { key: "existing" },
+          { generated_value: 101 }
+        ],
+        audit: [{ key: "existing" }]
+      })
+    );
+    const second = withSnapshots(
+      makeSequence("table-source-b", 202),
+      snapshotTables({
+        resources: [{ key: "existing" }],
+        audit: [{ key: "existing" }]
+      }),
+      snapshotTables({
+        resources: [{ key: "existing" }],
+        audit: [
+          { key: "existing" },
+          { generated_value: 202 }
+        ]
+      })
+    );
+
+    expectLiteral([first, second]);
+  });
+
+  it("rejects equivalent sessions using different evidence pointers", () => {
+    expectLiteral([
+      makeSequence("pointer-source-a", 101, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: 101 }
+        ]
+      }),
+      makeSequence("pointer-source-b", 202, {
+        afterRows: [
+          { key: "existing" },
+          { alternate_value: 202 }
+        ]
+      })
+    ]);
+  });
+
+  it("rejects inconsistent snapshot value types", () => {
+    expectLiteral([
+      makeSequence("snapshot-type-a", 101, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: 101 }
+        ]
+      }),
+      makeSequence("snapshot-type-b", 202, {
+        afterRows: [
+          { key: "existing" },
+          { generated_value: "202" }
+        ]
+      })
+    ]);
+  });
+
+  it("rejects update-only snapshot changes", () => {
+    expectLiteral([
+      makeSequence("update-only-a", 101, {
+        beforeRows: [
+          { key: "existing", state: "old" }
+        ],
+        afterRows: [
+          {
+            key: "existing",
+            state: "new",
+            generated_value: 101
+          }
+        ]
+      }),
+      makeSequence("update-only-b", 202, {
+        beforeRows: [
+          { key: "existing", state: "old" }
+        ],
+        afterRows: [
+          {
+            key: "existing",
+            state: "new",
+            generated_value: 202
+          }
+        ]
+      })
+    ]);
+  });
+
+  it("rejects combined update and insert snapshot changes", () => {
+    expectLiteral([
+      makeSequence("update-insert-a", 101, {
+        beforeRows: [
+          { key: "existing", state: "old" }
+        ],
+        afterRows: [
+          { key: "existing", state: "new" },
+          { generated_value: 101 }
+        ]
+      }),
+      makeSequence("update-insert-b", 202, {
+        beforeRows: [
+          { key: "existing", state: "old" }
+        ],
+        afterRows: [
+          { key: "existing", state: "new" },
+          { generated_value: 202 }
+        ]
+      })
+    ]);
+  });
+
+  it("rejects candidates already present numerically in the initial snapshot", () => {
+    const beforeRows = [
+      { reserved: 12 },
+      { reserved: 13 }
+    ];
+
+    expectLiteral([
+      makeSequence("initial-number-a", 12, {
+        beforeRows
+      }),
+      makeSequence("initial-number-b", 13, {
+        beforeRows
+      })
+    ]);
+  });
+
+  it("rejects candidates already present as strings in the initial snapshot", () => {
+    const beforeRows = [
+      { reserved: "12" },
+      { reserved: "13" }
+    ];
+
+    expectLiteral([
+      makeSequence("initial-string-a", 12, {
+        beforeRows
+      }),
+      makeSequence("initial-string-b", 13, {
+        beforeRows
       })
     ]);
   });
