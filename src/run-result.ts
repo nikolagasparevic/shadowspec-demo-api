@@ -10,10 +10,19 @@ import { ReplayTargetSafetyError } from "./replay-target-safety";
 import { ScenarioConfigurationError } from "./scenario-validation";
 import { ScenarioLoadError } from "./load-scenarios";
 import { ReplayRequestError } from "./replay";
+import { ScenarioBundleError } from "./scenario-bundle";
 
-export const RUN_RESULT_VERSION = 1 as const;
+export const RUN_RESULT_VERSION = 2 as const;
 export const RUN_RESULT_SOURCE = "shadowspec-replay" as const;
-export const RUN_RESULT_REPORT_VERSION = 1 as const;
+export const RUN_RESULT_REPORT_VERSION = 2 as const;
+
+export type RunCoverageSummary = {
+  inputCaptures: number;
+  executableCaptures: number;
+  rejectedCaptures: number;
+  excludedCaptures: number;
+  complete: boolean;
+};
 
 export type RunTerminalStatus =
   | "passed"
@@ -59,6 +68,8 @@ export type ShadowSpecRunResult = {
   workflowRunId?: string;
   runAttempt: number;
   projectId?: string;
+  exportId: string | null;
+  coverage: RunCoverageSummary | null;
   startedAt: string;
   finishedAt: string;
   terminalStatus: RunTerminalStatus;
@@ -74,6 +85,8 @@ export type ShadowSpecRunResult = {
 };
 
 export type RunProgress = {
+  exportId: string | null;
+  coverage: RunCoverageSummary | null;
   scenarios: number;
   scenariosCompleted: number;
   plannedChecks: number;
@@ -130,6 +143,8 @@ const RUN_RESULT_FIELDS = new Set([
   "workflowRunId",
   "runAttempt",
   "projectId",
+  "exportId",
+  "coverage",
   "startedAt",
   "finishedAt",
   "terminalStatus",
@@ -455,6 +470,52 @@ export function validateRunResult(
     );
   }
 
+  if (
+    result.exportId !== null &&
+    (typeof result.exportId !== "string" || !/^[0-9a-f]{64}$/.test(result.exportId))
+  ) {
+    throw new RunResultError(
+      "RUN_RESULT_INVALID",
+      "ShadowSpec run result export identity is invalid."
+    );
+  }
+  if (result.coverage !== null) {
+    if (
+      typeof result.coverage !== "object" ||
+      Array.isArray(result.coverage)
+    ) {
+      throw new RunResultError("RUN_RESULT_INVALID", "ShadowSpec run coverage is invalid.");
+    }
+    const coverage = result.coverage as Record<string, unknown>;
+    const coverageFields = [
+      "inputCaptures",
+      "executableCaptures",
+      "rejectedCaptures",
+      "excludedCaptures"
+    ];
+    if (
+      Object.keys(coverage).some((field) => ![...coverageFields, "complete"].includes(field)) ||
+      coverageFields.some((field) => !isNonNegativeInteger(coverage[field])) ||
+      typeof coverage.complete !== "boolean" ||
+      Number(coverage.inputCaptures) !==
+        Number(coverage.executableCaptures) +
+        Number(coverage.rejectedCaptures) +
+        Number(coverage.excludedCaptures)
+    ) {
+      throw new RunResultError("RUN_RESULT_INVALID", "ShadowSpec run coverage is invalid.");
+    }
+  }
+  if (
+    (result.exportId === null) !== (result.coverage === null) ||
+    (result.coverage !== null &&
+      (result.coverage as RunCoverageSummary).executableCaptures !== Number(result.plannedChecks))
+  ) {
+    throw new RunResultError(
+      "RUN_RESULT_INVALID",
+      "ShadowSpec run coverage does not match planned checks."
+    );
+  }
+
   const numericFields = [
     "scenarios",
     "scenariosCompleted",
@@ -508,11 +569,19 @@ export function validateRunResult(
       Number(result.failedChecks) !== 0 ||
       Number(result.checks) !== Number(result.plannedChecks) ||
       Number(result.scenariosCompleted) !== Number(result.scenarios) ||
+      result.exportId === null ||
+      result.coverage === null ||
+      !(result.coverage as RunCoverageSummary).complete ||
+      (result.coverage as RunCoverageSummary).rejectedCaptures !== 0 ||
       result.fatalError !== null
     )) ||
     (isBehavioral && (
       Number(result.failedChecks) === 0 ||
       Number(result.scenariosCompleted) !== Number(result.scenarios) ||
+      result.exportId === null ||
+      result.coverage === null ||
+      !(result.coverage as RunCoverageSummary).complete ||
+      (result.coverage as RunCoverageSummary).rejectedCaptures !== 0 ||
       result.fatalError !== null
     )) ||
     (!isPassed && !isBehavioral && (
@@ -588,6 +657,8 @@ export function createRunResult(
     reportSource: RUN_RESULT_SOURCE,
     reportVersion: RUN_RESULT_REPORT_VERSION,
     ...identity,
+    exportId: progress.exportId,
+    coverage: progress.coverage,
     startedAt,
     finishedAt,
     terminalStatus,
@@ -711,6 +782,16 @@ export function classifyRunError(error: unknown): {
     };
   }
   if (error instanceof ScenarioLoadError) {
+    return {
+      terminalStatus: "configuration_failed",
+      fatalError: {
+        category: "configuration",
+        code: error.code,
+        message: error.message
+      }
+    };
+  }
+  if (error instanceof ScenarioBundleError) {
     return {
       terminalStatus: "configuration_failed",
       fatalError: {

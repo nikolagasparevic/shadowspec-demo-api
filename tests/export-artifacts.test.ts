@@ -14,6 +14,7 @@ import {
   ScenarioExportError
 } from "../src/export-scenarios";
 import { runReplay } from "../src/run-replay";
+import type { FrozenCaptureSet } from "../src/export-captures";
 
 const temporaryDirectories: string[] = [];
 
@@ -32,58 +33,53 @@ function temporaryPaths() {
     candidatePath: path.join(
       directory,
       "shadowspec-candidates.json"
+    ),
+    diagnosticPath: path.join(
+      directory,
+      "shadowspec-export-result.json"
     )
   };
 }
 
-function validGroups() {
-  return [
-    {
+function validCaptures(): FrozenCaptureSet {
+  return {
+    maxVisibleCaptureId: 1,
+    captures: [{
       id: 1,
+      active: true,
+      sessionId: null,
       method: "GET",
       path: "/health",
       pathParams: {},
       queryParams: {},
       requestBody: null,
-      responses: [
-        {
-          status: 200,
-          body: { status: "ok" }
-        }
-      ]
-    }
-  ];
+      responseStatus: 200,
+      responseBody: { status: "ok" },
+      snapshots: [{
+        tables: { resources: { rows: [] } }
+      }]
+    }]
+  };
 }
 
-function sensitiveGroups() {
-  return [
-    {
-      id: 1,
-      method: "GET",
-      path: "/profile",
-      pathParams: {},
-      queryParams: {},
-      requestBody: null,
-      responses: [
-        {
-          status: 200,
-          body: { token: "secret" }
-        }
-      ]
-    }
-  ];
+function sensitiveCaptures(): FrozenCaptureSet {
+  const frozen = validCaptures();
+  frozen.captures[0].path = "/profile";
+  frozen.captures[0].responseBody = { token: "secret" };
+  return frozen;
 }
 
 async function runExport(
   scenarioPath: string,
   candidatePath: string,
-  groups: ReturnType<typeof validGroups> = validGroups()
+  frozen: FrozenCaptureSet = validCaptures()
 ) {
   await exportScenarios({
     scenarioPath,
     candidatePath,
-    getScenarioGroups: async () => groups,
-    getCapturedRequests: async () => [],
+    diagnosticPath: path.join(path.dirname(scenarioPath), "shadowspec-export-result.json"),
+    projectId: "test-project",
+    loadFrozenCaptureSet: async () => frozen,
     log: () => undefined
   });
 }
@@ -114,13 +110,15 @@ describe("scenario export artifact publication", () => {
       JSON.parse(
         fs.readFileSync(paths.scenarioPath, "utf8")
       )
-    ).toMatchObject([
-      {
+    ).toMatchObject({
+      version: 2,
+      kind: "shadowspec-scenario-bundle",
+      scenarios: [{
         id: 1,
         request: { path: "/health" },
         expected: { body: { status: "ok" } }
-      }
-    ]);
+      }]
+    });
   });
 
   it("invalidates an old artifact when sanitized response export fails", async () => {
@@ -131,12 +129,15 @@ describe("scenario export artifact publication", () => {
       runExport(
         paths.scenarioPath,
         paths.candidatePath,
-        sensitiveGroups()
+        sensitiveCaptures()
       )
     ).rejects.toMatchObject<Partial<ScenarioExportError>>({
-      code: "SANITIZED_RESPONSE_FIELD_UNSUPPORTED"
+      code: "EXPORT_COVERAGE_INCOMPLETE"
     });
     expect(fs.existsSync(paths.scenarioPath)).toBe(false);
+    const diagnostic = fs.readFileSync(paths.diagnosticPath, "utf8");
+    expect(diagnostic).toContain("REJECTED_SANITIZATION");
+    expect(diagnostic).not.toContain("secret");
   });
 
   it("invalidates an old artifact on arbitrary construction failure", async () => {
@@ -147,10 +148,10 @@ describe("scenario export artifact publication", () => {
       exportScenarios({
         scenarioPath: paths.scenarioPath,
         candidatePath: paths.candidatePath,
-        getScenarioGroups: async () => {
+        projectId: "test-project",
+        loadFrozenCaptureSet: async () => {
           throw new Error("construction failed");
         },
-        getCapturedRequests: async () => [],
         log: () => undefined
       })
     ).rejects.toThrow("construction failed");
@@ -165,14 +166,26 @@ describe("scenario export artifact publication", () => {
     await exportScenarios({
       scenarioPath: paths.scenarioPath,
       candidatePath: paths.candidatePath,
-      getScenarioGroups: async () => [],
-      getCapturedRequests: async () => [],
+      diagnosticPath: paths.diagnosticPath,
+      projectId: "test-project",
+      loadFrozenCaptureSet: async () => ({
+        maxVisibleCaptureId: null,
+        captures: []
+      }),
       log
     });
 
     expect(
       JSON.parse(fs.readFileSync(paths.scenarioPath, "utf8"))
-    ).toEqual([]);
+    ).toMatchObject({
+      version: 2,
+      coverage: {
+        complete: true,
+        executableCaptures: 0,
+        checkCount: 0
+      },
+      scenarios: []
+    });
     expect(log).toHaveBeenCalledWith("No scenarios found.");
   });
 
@@ -183,7 +196,7 @@ describe("scenario export artifact publication", () => {
       runExport(
         paths.scenarioPath,
         paths.candidatePath,
-        sensitiveGroups()
+        sensitiveCaptures()
       )
     ).rejects.toBeInstanceOf(ScenarioExportError);
     expect(fs.existsSync(paths.scenarioPath)).toBe(false);
@@ -216,8 +229,8 @@ describe("scenario export artifact publication", () => {
         scenarioPath: paths.scenarioPath,
         candidatePath: paths.candidatePath,
         fileSystem,
-        getScenarioGroups: async () => validGroups(),
-        getCapturedRequests: async () => [],
+        projectId: "test-project",
+        loadFrozenCaptureSet: async () => validCaptures(),
         log: () => undefined
       })
     ).rejects.toMatchObject<Partial<ScenarioArtifactError>>({
@@ -243,7 +256,7 @@ describe("scenario export artifact publication", () => {
       runExport(
         paths.scenarioPath,
         paths.candidatePath,
-        sensitiveGroups()
+        sensitiveCaptures()
       )
     ).rejects.toBeInstanceOf(ScenarioExportError);
 
@@ -274,7 +287,7 @@ describe("scenario export artifact publication", () => {
     await runExport(
       paths.scenarioPath,
       paths.candidatePath,
-      []
+      { maxVisibleCaptureId: null, captures: [] }
     );
     const request = vi.fn();
 
@@ -325,9 +338,38 @@ describe("scenario export artifact publication", () => {
 
     expect(request).toHaveBeenCalledOnce();
     expect(JSON.parse(reportWrites[0])).toMatchObject({
+      version: 2,
+      exportId: expect.stringMatching(/^[0-9a-f]{64}$/),
+      coverage: {
+        complete: true,
+        executableCaptures: 1
+      },
       checks: 1,
       passedChecks: 1,
       failedChecks: 0
     });
+  });
+
+  it("does not read candidate diagnostics when replaying", async () => {
+    const paths = temporaryPaths();
+    await runExport(paths.scenarioPath, paths.candidatePath);
+    fs.writeFileSync(paths.candidatePath, "not valid JSON and not authoritative");
+    const request = vi.fn(async () => ({
+      status: 200,
+      body: { status: "ok" }
+    }));
+
+    await runReplay({
+      preflightReplaySafety: async () => undefined,
+      loadScenarios: () => JSON.parse(fs.readFileSync(paths.scenarioPath, "utf8")),
+      verifyReplayTarget: async () => undefined,
+      applyReplaySetup: async () => undefined,
+      replayRequest: request,
+      invalidateReportFile: () => undefined,
+      writeReportFile: () => undefined,
+      log: () => undefined
+    });
+
+    expect(request).toHaveBeenCalledOnce();
   });
 });

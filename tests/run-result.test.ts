@@ -41,6 +41,8 @@ const identity: RunIdentity = {
   projectId: "8ef76468-72f9-4df4-a263-a4f88540e877"
 };
 const emptyProgress = (): RunProgress => ({
+  exportId: null,
+  coverage: null,
   scenarios: 0,
   scenariosCompleted: 0,
   plannedChecks: 0,
@@ -48,6 +50,24 @@ const emptyProgress = (): RunProgress => ({
   failedChecks: 0,
   failures: []
 });
+
+function completeProgress(checks = 1): RunProgress {
+  return {
+    ...emptyProgress(),
+    exportId: "a".repeat(64),
+    coverage: {
+      inputCaptures: checks,
+      executableCaptures: checks,
+      rejectedCaptures: 0,
+      excludedCaptures: 0,
+      complete: true
+    },
+    scenarios: checks,
+    scenariosCompleted: checks,
+    plannedChecks: checks,
+    passedChecks: checks
+  };
+}
 
 function directory() {
   const value = fs.mkdtempSync(
@@ -131,11 +151,7 @@ describe("terminal run results", () => {
   });
 
   it("validates passed and behavioral terminal states", () => {
-    const passedProgress = emptyProgress();
-    passedProgress.scenarios = 1;
-    passedProgress.scenariosCompleted = 1;
-    passedProgress.plannedChecks = 1;
-    passedProgress.passedChecks = 1;
+    const passedProgress = completeProgress();
     expect(createRunResult(
       identity,
       "2026-01-01T00:00:00.000Z",
@@ -197,12 +213,29 @@ describe("terminal run results", () => {
     })).toThrow("expected execution");
   });
 
+  it("does not treat version-one or coverage-free results as authoritative", () => {
+    const passed = createRunResult(
+      identity,
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:01.000Z",
+      "passed",
+      completeProgress(),
+      null
+    );
+    expect(() => validateRunResult({
+      ...passed,
+      version: 1,
+      reportVersion: 1
+    })).toThrow("version or source is unsupported");
+    expect(() => validateRunResult({
+      ...passed,
+      exportId: null,
+      coverage: null
+    })).toThrow("terminal state");
+  });
+
   it("rejects incomplete success and incomplete behavioral runs", () => {
-    const passedProgress = emptyProgress();
-    passedProgress.scenarios = 1;
-    passedProgress.scenariosCompleted = 1;
-    passedProgress.plannedChecks = 1;
-    passedProgress.passedChecks = 1;
+    const passedProgress = completeProgress();
     const passed = createRunResult(
       identity,
       "2026-01-01T00:00:00.000Z",
@@ -214,7 +247,7 @@ describe("terminal run results", () => {
     expect(() => validateRunResult({
       ...passed,
       plannedChecks: 2
-    })).toThrow("terminal state");
+    })).toThrow("coverage does not match planned checks");
 
     const behavioral = {
       ...passed,
@@ -243,6 +276,14 @@ describe("terminal run results", () => {
         "2026-01-01T00:00:01.000Z",
         "behavioral_failed",
         {
+          exportId: "a".repeat(64),
+          coverage: {
+            inputCaptures: 1,
+            executableCaptures: 1,
+            rejectedCaptures: 0,
+            excludedCaptures: 0,
+            complete: true
+          },
           scenarios: 1,
           scenariosCompleted: 1,
           plannedChecks: 1,

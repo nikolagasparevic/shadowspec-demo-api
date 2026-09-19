@@ -23,6 +23,7 @@ import {
   ReplayTargetSafetyError
 } from "../src/replay-target-safety";
 import { ReplayRequestError } from "../src/replay";
+import { scenarioBundle } from "./helpers/scenario-bundle";
 
 type ReplayResult = {
   status: number;
@@ -117,7 +118,7 @@ async function execute(
 
   try {
     await runReplay({
-      loadScenarios: () => scenarios,
+      loadScenarios: () => scenarioBundle(scenarios),
       replayRequest: replayMock,
       applyReplaySetup: setupMock,
       preflightReplaySafety: preflightMock,
@@ -1010,6 +1011,34 @@ describe("structured lifecycle binding failures", () => {
         code: "SCENARIO_CONFIGURATION_INVALID"
       }
     });
+  });
+
+  it("rejects a raw scenario array before target verification or execution", async () => {
+    const result = await execute([standaloneScenario()], [], {
+      loadScenarios: (() => [standaloneScenario()]) as never
+    });
+
+    expect(result.error).toMatchObject({
+      code: "EXPORT_ARTIFACT_CORRELATION_INVALID"
+    });
+    expect(result.targetVerificationMock).not.toHaveBeenCalled();
+    expect(result.setupMock).not.toHaveBeenCalled();
+    expect(result.replayMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects modified bundle content before target verification or execution", async () => {
+    const changed = scenarioBundle([standaloneScenario()]);
+    changed.scenarios[0].expected.body = { status: "tampered" };
+    const result = await execute([standaloneScenario()], [], {
+      loadScenarios: (() => changed) as never
+    });
+
+    expect(result.error).toMatchObject({
+      code: "EXPORT_ARTIFACT_CORRELATION_INVALID"
+    });
+    expect(result.targetVerificationMock).not.toHaveBeenCalled();
+    expect(result.setupMock).not.toHaveBeenCalled();
+    expect(result.replayMock).not.toHaveBeenCalled();
   });
 
   it("publishes infrastructure failure for target timeout", async () => {

@@ -5,6 +5,7 @@ import { applyReplaySetup } from "./setup-replay";
 import { preflightReplaySafety } from "./replay-safety";
 import { verifyReplayTarget } from "./replay-target-safety";
 import { validateScenarios } from "./scenario-validation";
+import { validateScenarioBundle } from "./scenario-bundle";
 import {
   captureBindings,
   LifecycleBindingError,
@@ -75,6 +76,8 @@ export async function runReplay(
   const resultPath = getRunResultPath(identity);
   const startedAt = dependencies.now().toISOString();
   const progress: RunProgress = {
+    exportId: null,
+    coverage: null,
     scenarios: 0,
     scenariosCompleted: 0,
     plannedChecks: 0,
@@ -92,7 +95,21 @@ export async function runReplay(
   try {
     await dependencies.preflightReplaySafety();
 
-    const scenarios = dependencies.loadScenarios();
+    const bundle = validateScenarioBundle(
+      dependencies.loadScenarios(
+        dependencies.environment
+      ),
+      dependencies.environment.SHADOWSPEC_PROJECT_ID
+    );
+    const scenarios = bundle.scenarios;
+    progress.exportId = bundle.exportId;
+    progress.coverage = {
+      inputCaptures: bundle.input.captureCount,
+      executableCaptures: bundle.coverage.executableCaptures,
+      rejectedCaptures: bundle.coverage.rejectedCaptures,
+      excludedCaptures: bundle.coverage.excludedCaptures,
+      complete: bundle.coverage.complete
+    };
     progress.scenarios = scenarios.length;
     progress.plannedChecks = scenarios.reduce(
       (total, scenario) =>
@@ -358,6 +375,8 @@ if (require.main === module) {
           startedAt,
           new Date().toISOString(),
           {
+            exportId: null,
+            coverage: null,
             scenarios: 0,
             scenariosCompleted: 0,
             plannedChecks: 0,

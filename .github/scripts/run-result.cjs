@@ -15,7 +15,7 @@ const TERMINAL_STATUSES = new Set([
 const RUN_RESULT_FIELDS = new Set([
   "version", "reportSource", "reportVersion", "runId", "repository",
   "commitSha", "sourceHeadSha", "workflowRunId", "runAttempt",
-  "projectId", "startedAt", "finishedAt", "terminalStatus",
+  "projectId", "exportId", "coverage", "startedAt", "finishedAt", "terminalStatus",
   "scenarios", "scenariosCompleted", "plannedChecks", "checks",
   "passedChecks", "failedChecks", "behavioralFailures", "failures",
   "fatalError"
@@ -129,9 +129,9 @@ function validateRunResult(value, expectedIdentity) {
     );
   }
   if (
-    value.version !== 1 ||
+    value.version !== 2 ||
     value.reportSource !== "shadowspec-replay" ||
-    value.reportVersion !== 1 ||
+    value.reportVersion !== 2 ||
     !TERMINAL_STATUSES.has(value.terminalStatus)
   ) {
     throw new RunResultValidationError(
@@ -165,6 +165,41 @@ function validateRunResult(value, expectedIdentity) {
       );
     }
   }
+  if (
+    value.exportId !== null &&
+    (typeof value.exportId !== "string" || !/^[0-9a-f]{64}$/.test(value.exportId))
+  ) {
+    throw new RunResultValidationError(
+      "RUN_RESULT_INVALID",
+      "ShadowSpec run result export identity is invalid."
+    );
+  }
+  if (value.coverage !== null) {
+    const coverageFields = [
+      "inputCaptures", "executableCaptures", "rejectedCaptures", "excludedCaptures"
+    ];
+    if (
+      !value.coverage ||
+      typeof value.coverage !== "object" ||
+      Array.isArray(value.coverage) ||
+      Object.keys(value.coverage).some((field) =>
+        ![...coverageFields, "complete"].includes(field)
+      ) ||
+      coverageFields.some((field) =>
+        !Number.isSafeInteger(value.coverage[field]) || value.coverage[field] < 0
+      ) ||
+      typeof value.coverage.complete !== "boolean" ||
+      value.coverage.inputCaptures !==
+        value.coverage.executableCaptures +
+        value.coverage.rejectedCaptures +
+        value.coverage.excludedCaptures
+    ) {
+      throw new RunResultValidationError(
+        "RUN_RESULT_INVALID",
+        "ShadowSpec run coverage is invalid."
+      );
+    }
+  }
   const numericFields = [
     "runAttempt",
     "scenarios",
@@ -191,6 +226,9 @@ function validateRunResult(value, expectedIdentity) {
     value.behavioralFailures !== value.failedChecks ||
     !failuresAreValid(value.failures) ||
     value.failures.length !== value.failedChecks ||
+    (value.exportId === null) !== (value.coverage === null) ||
+    (value.coverage !== null &&
+      value.coverage.executableCaptures !== value.plannedChecks) ||
     !Number.isFinite(Date.parse(value.startedAt)) ||
     !Number.isFinite(Date.parse(value.finishedAt)) ||
     Date.parse(value.finishedAt) < Date.parse(value.startedAt)
@@ -208,11 +246,19 @@ function validateRunResult(value, expectedIdentity) {
       value.failedChecks !== 0 ||
       value.checks !== value.plannedChecks ||
       value.scenariosCompleted !== value.scenarios ||
+      value.exportId === null ||
+      value.coverage === null ||
+      !value.coverage.complete ||
+      value.coverage.rejectedCaptures !== 0 ||
       value.fatalError !== null
     )) ||
     (behavioral && (
       value.failedChecks === 0 ||
       value.scenariosCompleted !== value.scenarios ||
+      value.exportId === null ||
+      value.coverage === null ||
+      !value.coverage.complete ||
+      value.coverage.rejectedCaptures !== 0 ||
       value.fatalError !== null
     )) ||
     (!passed && !behavioral && (
@@ -290,10 +336,12 @@ function writeJsonAtomically(filePath, value, fileSystem = fs) {
 function failureResult(identity, code, message, now = new Date()) {
   const timestamp = now.toISOString();
   return {
-    version: 1,
+    version: 2,
     reportSource: "shadowspec-replay",
-    reportVersion: 1,
+    reportVersion: 2,
     ...identity,
+    exportId: null,
+    coverage: null,
     startedAt: timestamp,
     finishedAt: timestamp,
     terminalStatus: "infrastructure_failed",

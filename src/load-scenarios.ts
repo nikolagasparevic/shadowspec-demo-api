@@ -1,5 +1,10 @@
 import fs from "fs";
 import type { ReplaySetup } from "./setup-replay";
+import {
+  ScenarioBundleError,
+  validateScenarioBundle,
+  type ScenarioBundle
+} from "./scenario-bundle";
 
 export type ShadowSpecRequest = {
   method: string;
@@ -70,9 +75,16 @@ export type ShadowSpecScenario = {
 
 export class ScenarioLoadError extends Error {
   readonly name = "ScenarioLoadError";
-  readonly code = "SCENARIO_CONFIGURATION_INVALID";
-
-  constructor(options?: ErrorOptions) {
+  constructor(
+    readonly code:
+      | "SCENARIO_CONFIGURATION_INVALID"
+      | "EXPORT_CAPTURE_UNACCOUNTED"
+      | "EXPORT_CAPTURE_DUPLICATED"
+      | "EXPORT_COVERAGE_INCOMPLETE"
+      | "EXPORT_ARTIFACT_CORRELATION_INVALID" =
+        "SCENARIO_CONFIGURATION_INVALID",
+    options?: ErrorOptions
+  ) {
     super(
       "ShadowSpec scenario configuration could not be loaded or parsed.",
       options
@@ -80,14 +92,24 @@ export class ScenarioLoadError extends Error {
   }
 }
 
-export function loadScenarios(): ShadowSpecScenario[] {
+export function loadScenarios(
+  environment: NodeJS.ProcessEnv = process.env
+): ScenarioBundle {
   try {
     const data = fs.readFileSync(
       "shadowspec-scenarios.json",
       "utf-8"
     );
-    return JSON.parse(data);
+    return validateScenarioBundle(
+      JSON.parse(data),
+      environment.SHADOWSPEC_PROJECT_ID
+    );
   } catch (error) {
-    throw new ScenarioLoadError({ cause: error });
+    throw new ScenarioLoadError(
+      error instanceof ScenarioBundleError
+        ? error.code
+        : "SCENARIO_CONFIGURATION_INVALID",
+      { cause: error }
+    );
   }
 }

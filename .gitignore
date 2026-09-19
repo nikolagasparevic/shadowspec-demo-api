@@ -1,5 +1,6 @@
 shadowspec-report.json
 shadowspec-candidates.json
+shadowspec-export-result.json
 shadowspec-results/
 dist/
 node_modules/.kilo/

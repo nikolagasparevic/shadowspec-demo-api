@@ -165,7 +165,7 @@ describe("buildScenarios", () => {
     const scenarios = buildScenarios(groups);
     const artifact = buildCandidateArtifact(groups);
 
-    expect(scenarios[0].dynamicFields).toBeUndefined();
+    expect("dynamicFields" in scenarios[0]).toBe(false);
     expect(
       artifact.candidates.map(
         ({ pointer, reason }) => ({ pointer, reason })
@@ -276,8 +276,7 @@ describe("buildScenarios", () => {
       }
     ];
 
-    expect(buildScenarios(groups)[0].dynamicFields)
-      .toBeUndefined();
+    expect("dynamicFields" in buildScenarios(groups)[0]).toBe(false);
     expect(buildCandidateArtifact(groups).candidates)
       .toMatchObject([
         {
@@ -577,7 +576,7 @@ describe("buildScenarios", () => {
       }
     ]);
 
-    expect(result[0].dynamicFields).toBeUndefined();
+    expect("dynamicFields" in result[0]).toBe(false);
   });
 });
 

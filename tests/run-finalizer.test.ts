@@ -50,15 +50,23 @@ function validResult(
   overrides: Partial<ShadowSpecRunResult> = {}
 ): ShadowSpecRunResult {
   return {
-    version: 1,
+    version: 2,
     reportSource: "shadowspec-replay",
-    reportVersion: 1,
+    reportVersion: 2,
     runId: "321.1.replay",
     repository: "example/shadowspec",
     commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     sourceHeadSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     workflowRunId: "321",
     runAttempt: 1,
+    exportId: "a".repeat(64),
+    coverage: {
+      inputCaptures: 1,
+      executableCaptures: 1,
+      rejectedCaptures: 0,
+      excludedCaptures: 0,
+      complete: true
+    },
     startedAt: "2026-01-01T00:00:00.000Z",
     finishedAt: "2026-01-01T00:00:01.000Z",
     terminalStatus: "passed",

@@ -322,6 +322,7 @@ function formatShadowSpecComment(value, expectedIdentity) {
       ...correlation.slice(1),
       "",
       `**${report.passedChecks} of ${report.checks} checks passed** across **${report.scenarios} scenarios**.`,
+      `Coverage: **${report.coverage.executableCaptures} executable · ${report.coverage.excludedCaptures} excluded · ${report.coverage.inputCaptures} captured**.`,
       "",
       "No behavioral regressions detected.",
       "",
@@ -361,6 +362,10 @@ function formatShadowSpecComment(value, expectedIdentity) {
     "",
     `**${report.passedChecks} passed · ${report.failedChecks} failed · ${report.scenarios} scenarios**`
   ];
+  lines.push(
+    "",
+    `Coverage: **${report.coverage.executableCaptures} executable · ${report.coverage.excludedCaptures} excluded · ${report.coverage.inputCaptures} captured**.`
+  );
 
   for (const failure of report.failures ?? []) {
     lines.push("", formatFailure(failure));

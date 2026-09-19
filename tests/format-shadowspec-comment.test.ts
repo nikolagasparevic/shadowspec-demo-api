@@ -56,16 +56,25 @@ function behavioralFailure(
 function runResult(
   overrides: Partial<ShadowSpecRunResult> = {}
 ): ShadowSpecRunResult {
+  const executableCaptures = overrides.plannedChecks ?? 1;
   return {
-    version: 1,
+    version: 2,
     reportSource: "shadowspec-replay",
-    reportVersion: 1,
+    reportVersion: 2,
     runId: "123.1.replay",
     repository: "example/shadowspec",
     commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     sourceHeadSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     workflowRunId: "123",
     runAttempt: 1,
+    exportId: "a".repeat(64),
+    coverage: {
+      inputCaptures: executableCaptures,
+      executableCaptures,
+      rejectedCaptures: 0,
+      excludedCaptures: 0,
+      complete: true
+    },
     startedAt: "2026-01-01T00:00:00.000Z",
     finishedAt: "2026-01-01T00:01:00.000Z",
     terminalStatus: "passed",
@@ -483,7 +492,7 @@ describe("formatShadowSpecComment", () => {
 
   it("rejects unsupported versions and identity mismatches", () => {
     expect(() => formatShadowSpecComment(runResult({
-      version: 2 as 1
+      version: 1 as 2
     }))).toThrow("version, source, or terminal status");
     expect(() => formatShadowSpecComment(
       runResult(),
