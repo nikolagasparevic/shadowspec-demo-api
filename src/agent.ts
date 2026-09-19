@@ -27,6 +27,8 @@ export type ShadowSpecOptions = {
   capturePool?: Pool;
   tables?: readonly string[];
   enabled?: boolean;
+  schema?: string;
+  snapshotStatementTimeoutMs?: number;
 };
 
 function getConfiguredTables(): string[] {
@@ -84,6 +86,17 @@ export function registerShadowSpec(
     ...(options.tables ??
       getConfiguredTables())
   ];
+  const schema =
+    options.schema ??
+    process.env.SHADOWSPEC_SCHEMA ??
+    "public";
+  const configuredTimeout =
+    process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS;
+  const snapshotStatementTimeoutMs =
+    options.snapshotStatementTimeoutMs ??
+    (configuredTimeout === undefined
+      ? undefined
+      : Number(configuredTimeout));
 
   app.decorateRequest(
     "shadowSpecSnapshot",
@@ -119,7 +132,12 @@ export function registerShadowSpec(
         request.shadowSpecSnapshot =
           await captureDatabaseSnapshot(
             applicationPool,
-            tables
+            tables,
+            {
+              schema,
+              statementTimeoutMs:
+                snapshotStatementTimeoutMs
+            }
           );
       } catch (error) {
         request.shadowSpecSnapshot =

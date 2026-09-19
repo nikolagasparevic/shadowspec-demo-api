@@ -27,12 +27,49 @@ function createPool(
   } = {}
 ) {
   const clientQuery = vi.fn(
-    async (query: string) => {
+    async (query: string, parameters?: unknown[]) => {
       if (
         failures.recorder &&
         query.includes("INSERT INTO api_requests")
       ) {
         throw failures.recorder;
+      }
+
+      if (
+        failures.snapshot &&
+        query.includes("shadowspec:snapshot-relation")
+      ) {
+        throw failures.snapshot;
+      }
+
+      if (query.includes("shadowspec:snapshot-relation")) {
+        return {
+          rows: [{
+            oid: "41",
+            relkind: "r",
+            relpersistence: "p",
+            has_inheritance: false
+          }]
+        };
+      }
+
+      const columns = Object.keys(snapshotRows[0] ?? { id: 1 })
+        .sort();
+      if (query.includes("shadowspec:snapshot-columns")) {
+        return {
+          rows: columns.map((attname) => ({ attname }))
+        };
+      }
+
+      if (query.includes("shadowspec:snapshot-primary-key")) {
+        const key = columns.find((column) =>
+          column === "id" || column.endsWith("Id") || column.endsWith("_id")
+        ) ?? columns[0];
+        return { rows: [{ attname: key, position: 1 }] };
+      }
+
+      if (query.startsWith("SELECT ")) {
+        return { rows: snapshotRows };
       }
 
       return {
@@ -48,13 +85,7 @@ function createPool(
     release
   } as unknown as PoolClient;
   const query = vi.fn(async () => {
-    if (failures.snapshot) {
-      throw failures.snapshot;
-    }
-
-    return {
-      rows: snapshotRows
-    };
+    return { rows: [] };
   });
   const connect = vi.fn(async () => client);
   const end = vi.fn();
@@ -178,6 +209,8 @@ describe("public Fastify integration", () => {
   afterEach(() => {
     delete process.env.SHADOWSPEC_CAPTURE;
     delete process.env.SHADOWSPEC_TABLES;
+    delete process.env.SHADOWSPEC_SCHEMA;
+    delete process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS;
     delete process.env.SHADOWSPEC_REPLAY_TARGET;
     delete process.env.SHADOWSPEC_PROJECT_ID;
     delete process.env.SHADOWSPEC_REPLAY_DATABASE_ID;
@@ -284,6 +317,8 @@ describe("public Fastify integration", () => {
   it("lets explicit enabled state and tables override the environment", async () => {
     process.env.SHADOWSPEC_CAPTURE = "false";
     process.env.SHADOWSPEC_TABLES = "orders";
+    process.env.SHADOWSPEC_SCHEMA = "ignored";
+    process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS = "9000";
 
     const database = createPool([
       { id: 7, title: "Dune" }
@@ -292,21 +327,28 @@ describe("public Fastify integration", () => {
     const response = await injectCapturedRequest({
       applicationPool: database.pool,
       enabled: true,
-      tables: ["books"]
+      tables: ["books"],
+      schema: "catalog",
+      snapshotStatementTimeoutMs: 1200
     });
 
     expect(response.statusCode).toBe(200);
-    expect(database.query).toHaveBeenCalledTimes(1);
-    expect(database.query).toHaveBeenCalledWith(
-      'SELECT * FROM "books"'
+    expect(database.query).not.toHaveBeenCalled();
+    expect(database.clientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes('FROM ONLY "catalog"."books"')
+    )).toBe(true);
+    expect(database.clientQuery).toHaveBeenCalledWith(
+      "SET LOCAL statement_timeout = '1200ms'"
     );
-    expect(database.connect).toHaveBeenCalledTimes(1);
+    expect(database.connect).toHaveBeenCalledTimes(2);
   });
 
   it("preserves environment fallback behavior", async () => {
     process.env.SHADOWSPEC_CAPTURE = "true";
     process.env.SHADOWSPEC_TABLES =
       "libraries, books";
+    process.env.SHADOWSPEC_SCHEMA = "catalog";
+    process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS = "2400";
 
     const database = createPool();
 
@@ -314,15 +356,15 @@ describe("public Fastify integration", () => {
       applicationPool: database.pool
     });
 
-    expect(database.query).toHaveBeenNthCalledWith(
-      1,
-      'SELECT * FROM "libraries"'
+    const reads = database.clientQuery.mock.calls
+      .map(([sql]) => String(sql))
+      .filter((sql) => sql.startsWith("SELECT "));
+    expect(reads[0]).toContain('FROM ONLY "catalog"."books"');
+    expect(reads[1]).toContain('FROM ONLY "catalog"."libraries"');
+    expect(database.clientQuery).toHaveBeenCalledWith(
+      "SET LOCAL statement_timeout = '2400ms'"
     );
-    expect(database.query).toHaveBeenNthCalledWith(
-      2,
-      'SELECT * FROM "books"'
-    );
-    expect(database.connect).toHaveBeenCalledTimes(1);
+    expect(database.connect).toHaveBeenCalledTimes(2);
   });
 
   it("uses one pool for snapshots and capture writes without closing it", async () => {
@@ -336,19 +378,13 @@ describe("public Fastify integration", () => {
       tables: ["books"]
     });
 
-    expect(database.query).toHaveBeenCalledWith(
-      'SELECT * FROM "books"'
-    );
-    expect(database.connect).toHaveBeenCalledTimes(1);
-    expect(database.clientQuery).toHaveBeenNthCalledWith(
-      1,
-      "BEGIN"
-    );
-    expect(database.clientQuery).toHaveBeenNthCalledWith(
-      4,
-      "COMMIT"
-    );
-    expect(database.release).toHaveBeenCalledTimes(1);
+    expect(database.clientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes('FROM ONLY "public"."books"')
+    )).toBe(true);
+    expect(database.connect).toHaveBeenCalledTimes(2);
+    expect(database.clientQuery).toHaveBeenCalledWith("BEGIN");
+    expect(database.clientQuery).toHaveBeenCalledWith("COMMIT");
+    expect(database.release).toHaveBeenCalledTimes(2);
     expect(database.end).not.toHaveBeenCalled();
   });
 
@@ -365,20 +401,14 @@ describe("public Fastify integration", () => {
       tables: ["books"]
     });
 
-    expect(application.query).toHaveBeenCalledWith(
-      'SELECT * FROM "books"'
-    );
-    expect(application.connect).not.toHaveBeenCalled();
+    expect(application.clientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes('FROM ONLY "public"."books"')
+    )).toBe(true);
+    expect(application.connect).toHaveBeenCalledTimes(1);
     expect(capture.query).not.toHaveBeenCalled();
     expect(capture.connect).toHaveBeenCalledTimes(1);
-    expect(capture.clientQuery).toHaveBeenNthCalledWith(
-      1,
-      "BEGIN"
-    );
-    expect(capture.clientQuery).toHaveBeenNthCalledWith(
-      4,
-      "COMMIT"
-    );
+    expect(capture.clientQuery).toHaveBeenCalledWith("BEGIN");
+    expect(capture.clientQuery).toHaveBeenCalledWith("COMMIT");
     expect(application.end).not.toHaveBeenCalled();
     expect(capture.end).not.toHaveBeenCalled();
   });
@@ -492,7 +522,10 @@ describe("public Fastify integration", () => {
     );
 
     expect(snapshotLogger.error).toHaveBeenCalledWith(
-      { errorName: "Error" },
+      {
+        errorName: "SnapshotCaptureError",
+        errorCode: "SNAPSHOT_READ_FAILED"
+      },
       "ShadowSpec snapshot capture failed; request will not be recorded."
     );
     expect(recorderLogger.error).toHaveBeenCalledWith(
