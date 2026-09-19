@@ -24,10 +24,19 @@ function createPool(
   failures: {
     snapshot?: Error;
     recorder?: Error;
+    recorderHang?: "connect" | "begin" | "insert" | "commit";
   } = {}
 ) {
   const clientQuery = vi.fn(
     async (query: string, parameters?: unknown[]) => {
+      if (
+        (failures.recorderHang === "begin" && query === "BEGIN") ||
+        (failures.recorderHang === "insert" &&
+          query.includes("INSERT INTO api_requests")) ||
+        (failures.recorderHang === "commit" && query === "COMMIT")
+      ) {
+        return new Promise(() => {});
+      }
       if (
         failures.recorder &&
         query.includes("INSERT INTO api_requests")
@@ -87,7 +96,11 @@ function createPool(
   const query = vi.fn(async () => {
     return { rows: [] };
   });
-  const connect = vi.fn(async () => client);
+  const connect = vi.fn(() =>
+    failures.recorderHang === "connect"
+      ? new Promise<PoolClient>(() => {})
+      : Promise.resolve(client)
+  );
   const end = vi.fn();
   const pool = {
     query,
@@ -211,11 +224,14 @@ describe("public Fastify integration", () => {
     delete process.env.SHADOWSPEC_TABLES;
     delete process.env.SHADOWSPEC_SCHEMA;
     delete process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS;
+    delete process.env.SHADOWSPEC_SNAPSHOT_TIMEOUT_MS;
+    delete process.env.SHADOWSPEC_RECORDER_TIMEOUT_MS;
     delete process.env.SHADOWSPEC_REPLAY_TARGET;
     delete process.env.SHADOWSPEC_PROJECT_ID;
     delete process.env.SHADOWSPEC_REPLAY_DATABASE_ID;
     delete process.env.SHADOWSPEC_REPLAY_TARGET_ID;
     delete process.env.SHADOWSPEC_REPLAY_TARGET_TOKEN;
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -319,6 +335,8 @@ describe("public Fastify integration", () => {
     process.env.SHADOWSPEC_TABLES = "orders";
     process.env.SHADOWSPEC_SCHEMA = "ignored";
     process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS = "9000";
+    process.env.SHADOWSPEC_SNAPSHOT_TIMEOUT_MS = "0";
+    process.env.SHADOWSPEC_RECORDER_TIMEOUT_MS = "0";
 
     const database = createPool([
       { id: 7, title: "Dune" }
@@ -329,7 +347,9 @@ describe("public Fastify integration", () => {
       enabled: true,
       tables: ["books"],
       schema: "catalog",
-      snapshotStatementTimeoutMs: 1200
+      snapshotStatementTimeoutMs: 1200,
+      snapshotTimeoutMs: 5000,
+      recorderTimeoutMs: 5000
     });
 
     expect(response.statusCode).toBe(200);
@@ -365,6 +385,42 @@ describe("public Fastify integration", () => {
       "SET LOCAL statement_timeout = '2400ms'"
     );
     expect(database.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the environment snapshot deadline and fails open", async () => {
+    vi.useFakeTimers();
+    process.env.SHADOWSPEC_CAPTURE = "true";
+    process.env.SHADOWSPEC_TABLES = "books";
+    process.env.SHADOWSPEC_SNAPSHOT_TIMEOUT_MS = "10";
+    const connect = vi.fn(() => new Promise<PoolClient>(() => {}));
+    const logger = createLogger();
+    const app = Fastify({ loggerInstance: logger.logger });
+    let handled = 0;
+
+    registerShadowSpec(app, {
+      applicationPool: { connect } as unknown as Pool
+    });
+    app.post("/books", async (_request, reply) => {
+      handled++;
+      return reply.code(201).send({ ok: true });
+    });
+
+    const responsePromise = app.inject({ method: "POST", url: "/books" });
+    await vi.advanceTimersByTimeAsync(10);
+    const response = await responsePromise;
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ ok: true });
+    expect(handled).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      {
+        errorName: "SnapshotCaptureError",
+        errorCode: "SNAPSHOT_TIMEOUT",
+        errorStage: "snapshot-connect"
+      },
+      "ShadowSpec snapshot capture failed; request will not be recorded."
+    );
+    vi.useRealTimers();
+    await app.close();
   });
 
   it("uses one pool for snapshots and capture writes without closing it", async () => {
@@ -447,6 +503,46 @@ describe("public Fastify integration", () => {
   );
 
   it.each([
+    ["connect", "recorder-connect"],
+    ["insert", "recorder-insert"],
+    ["commit", "recorder-commit"]
+  ] as const)(
+    "preserves the application response when recorder %s hangs",
+    async (recorderHang, errorStage) => {
+      vi.useFakeTimers();
+      process.env.SHADOWSPEC_RECORDER_TIMEOUT_MS = "10";
+      const application = createPool([{ id: 7, title: "Dune" }]);
+      const capture = createPool([], { recorderHang });
+      const logger = createLogger();
+
+      const request = injectMutation(
+        "POST",
+        application,
+        capture,
+        logger.logger,
+        {
+          requestBody: { title: "Dune" },
+          responseBody: { ok: true, created: 41 }
+        }
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      const { response, mutations } = await request;
+
+      expect(mutations).toBe(1);
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toEqual({ ok: true, created: 41 });
+      expect(logger.error).toHaveBeenCalledWith(
+        {
+          errorName: "CaptureRecordError",
+          errorCode: "CAPTURE_RECORD_TIMEOUT",
+          errorStage
+        },
+        "ShadowSpec recorder write failed; response will be sent unchanged."
+      );
+    }
+  );
+
+  it.each([
     ["POST", 201],
     ["PATCH", 200],
     ["DELETE", 200]
@@ -524,7 +620,8 @@ describe("public Fastify integration", () => {
     expect(snapshotLogger.error).toHaveBeenCalledWith(
       {
         errorName: "SnapshotCaptureError",
-        errorCode: "SNAPSHOT_READ_FAILED"
+        errorCode: "SNAPSHOT_READ_FAILED",
+        errorStage: "snapshot-read"
       },
       "ShadowSpec snapshot capture failed; request will not be recorded."
     );

@@ -29,6 +29,8 @@ export type ShadowSpecOptions = {
   enabled?: boolean;
   schema?: string;
   snapshotStatementTimeoutMs?: number;
+  snapshotTimeoutMs?: number;
+  recorderTimeoutMs?: number;
 };
 
 function getConfiguredTables(): string[] {
@@ -45,6 +47,7 @@ function getCaptureErrorDetails(
 ): {
   errorName: string;
   errorCode?: string;
+  errorStage?: string;
 } {
   const errorName =
     error instanceof Error
@@ -57,12 +60,22 @@ function getCaptureErrorDetails(
     typeof error.code === "string"
       ? error.code
       : undefined;
+  const errorStage =
+    error !== null &&
+    typeof error === "object" &&
+    "stage" in error &&
+    typeof error.stage === "string"
+      ? error.stage
+      : undefined;
 
   return {
     errorName,
     ...(errorCode === undefined
       ? {}
-      : { errorCode })
+      : { errorCode }),
+    ...(errorStage === undefined
+      ? {}
+      : { errorStage })
   };
 }
 
@@ -97,6 +110,20 @@ export function registerShadowSpec(
     (configuredTimeout === undefined
       ? undefined
       : Number(configuredTimeout));
+  const configuredSnapshotTimeout =
+    process.env.SHADOWSPEC_SNAPSHOT_TIMEOUT_MS;
+  const snapshotTimeoutMs =
+    options.snapshotTimeoutMs ??
+    (configuredSnapshotTimeout === undefined
+      ? undefined
+      : Number(configuredSnapshotTimeout));
+  const configuredRecorderTimeout =
+    process.env.SHADOWSPEC_RECORDER_TIMEOUT_MS;
+  const recorderTimeoutMs =
+    options.recorderTimeoutMs ??
+    (configuredRecorderTimeout === undefined
+      ? undefined
+      : Number(configuredRecorderTimeout));
 
   app.decorateRequest(
     "shadowSpecSnapshot",
@@ -136,7 +163,8 @@ export function registerShadowSpec(
             {
               schema,
               statementTimeoutMs:
-                snapshotStatementTimeoutMs
+                snapshotStatementTimeoutMs,
+              snapshotTimeoutMs
             }
           );
       } catch (error) {
@@ -194,7 +222,8 @@ export function registerShadowSpec(
           reply.statusCode,
           responseBody,
           request.shadowSpecSnapshot,
-          request.shadowSpecSessionId
+          request.shadowSpecSessionId,
+          { timeoutMs: recorderTimeoutMs }
         );
       } catch (error) {
         request.log.error(

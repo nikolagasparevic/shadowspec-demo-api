@@ -1,4 +1,5 @@
 import {
+  afterEach,
   describe,
   expect,
   it,
@@ -20,13 +21,15 @@ type TableFixture = {
 function database(
   tables: Record<string, TableFixture>,
   fail?: (sql: string, table?: string) => unknown,
-  relationOids: string[] = []
+  relationOids: string[] = [],
+  beforeQuery?: (sql: string) => Promise<void>
 ) {
   let relationCall = 0;
   const query = vi.fn(async (
     sql: string,
     parameters?: unknown[]
   ) => {
+    await beforeQuery?.(sql);
     const table = parameters?.[1] as string | undefined;
     const failure = fail?.(sql, table);
     if (failure) throw failure;
@@ -78,6 +81,16 @@ function database(
   return { pool, connect, query, release };
 }
 
+function pending<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const books: TableFixture = {
   oid: "41",
   columns: ["title", "book_key"],
@@ -86,6 +99,9 @@ const books: TableFixture = {
 };
 
 describe("captureDatabaseSnapshot", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("uses one client and one repeatable-read transaction", async () => {
     const db = database({ books });
     await expect(captureDatabaseSnapshot(
@@ -217,7 +233,244 @@ describe("captureDatabaseSnapshot", () => {
     );
     await expect(captureDatabaseSnapshot(db.pool, ["books"]))
       .rejects.toMatchObject({ code: "SNAPSHOT_TIMEOUT" });
+    expect(db.query).not.toHaveBeenCalledWith("ROLLBACK");
+    expect(db.release).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "SNAPSHOT_TIMEOUT" })
+    );
+  });
+
+  it.each([0, -1, 1.5, Number.POSITIVE_INFINITY, Number.NaN])(
+    "rejects invalid total snapshot timeout %s",
+    async (snapshotTimeoutMs) => {
+      const db = database({ books });
+      await expect(captureDatabaseSnapshot(
+        db.pool,
+        ["books"],
+        { snapshotTimeoutMs }
+      )).rejects.toMatchObject({
+        code: "SNAPSHOT_CONFIGURATION_INVALID"
+      });
+      expect(db.connect).not.toHaveBeenCalled();
+    }
+  );
+
+  it("starts the deadline before pool checkout", async () => {
+    vi.useFakeTimers();
+    const connect = vi.fn(() => new Promise<PoolClient>(() => {}));
+    const result = captureDatabaseSnapshot(
+      { connect } as unknown as Pool,
+      ["books"],
+      { snapshotTimeoutMs: 20 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT",
+      stage: "snapshot-connect"
+    });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await expectation;
+    expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it("discards a client that arrives after checkout timed out", async () => {
+    vi.useFakeTimers();
+    const checkout = pending<PoolClient>();
+    const release = vi.fn();
+    const result = captureDatabaseSnapshot(
+      { connect: () => checkout.promise } as unknown as Pool,
+      ["books"],
+      { snapshotTimeoutMs: 10 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT"
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    await expectation;
+    checkout.resolve({ release } as unknown as PoolClient);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(release).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "SNAPSHOT_TIMEOUT" })
+    );
+  });
+
+  it("observes a late checkout rejection", async () => {
+    vi.useFakeTimers();
+    const checkout = pending<PoolClient>();
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const result = captureDatabaseSnapshot(
+        { connect: () => checkout.promise } as unknown as Pool,
+        ["books"],
+        { snapshotTimeoutMs: 10 }
+      );
+      const expectation = expect(result).rejects.toMatchObject({
+        code: "SNAPSHOT_TIMEOUT"
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      await expectation;
+      checkout.reject(new Error("late connection failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  it("times out a hung transaction start and discards the client", async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(() => new Promise(() => {}));
+    const release = vi.fn();
+    const pool = {
+      connect: async () => ({ query, release } as unknown as PoolClient)
+    } as unknown as Pool;
+    const result = captureDatabaseSnapshot(
+      pool,
+      ["books"],
+      { snapshotTimeoutMs: 15 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT",
+      stage: "snapshot-transaction"
+    });
+
+    await vi.advanceTimersByTimeAsync(15);
+    await expectation;
+    expect(release).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it("times out a hung table read and discards the client", async () => {
+    vi.useFakeTimers();
+    const db = database(
+      { books },
+      undefined,
+      [],
+      (sql) => sql.startsWith("SELECT ")
+        ? new Promise(() => {})
+        : Promise.resolve()
+    );
+    const result = captureDatabaseSnapshot(
+      db.pool,
+      ["books"],
+      { snapshotTimeoutMs: 20 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT",
+      stage: "snapshot-read"
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await expectation;
+    expect(db.release).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it("enforces one total deadline across individually fast operations", async () => {
+    vi.useFakeTimers();
+    const db = database(
+      { books },
+      undefined,
+      [],
+      () => new Promise((resolve) => setTimeout(resolve, 2))
+    );
+    const result = captureDatabaseSnapshot(
+      db.pool,
+      ["books"],
+      { snapshotTimeoutMs: 12, statementTimeoutMs: 10 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT"
+    });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await expectation;
+    expect(db.release).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it("caps local statement timeouts to the remaining total budget", async () => {
+    const db = database({ books });
+    await captureDatabaseSnapshot(db.pool, ["books"], {
+      snapshotTimeoutMs: 50,
+      statementTimeoutMs: 5000
+    });
+    const timeouts = db.query.mock.calls
+      .map(([sql]) => /^SET LOCAL statement_timeout = '(\d+)ms'$/.exec(sql)?.[1])
+      .filter((value): value is string => value !== undefined)
+      .map(Number);
+    expect(timeouts.length).toBeGreaterThanOrEqual(2);
+    expect(timeouts.every((value) => value > 0 && value <= 50)).toBe(true);
+  });
+
+  it("rolls back and releases normally after an ordinary failure", async () => {
+    const db = database({ books }, (sql) =>
+      sql.includes("snapshot-relation") ? new Error("read failed") : undefined
+    );
+    await expect(captureDatabaseSnapshot(db.pool, ["books"]))
+      .rejects.toMatchObject({ code: "SNAPSHOT_READ_FAILED" });
     expect(db.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(db.release).toHaveBeenCalledWith();
+  });
+
+  it("discards the client when rollback fails", async () => {
+    const db = database({ books }, (sql) => {
+      if (sql.includes("snapshot-relation")) return new Error("read failed");
+      if (sql === "ROLLBACK") return new Error("rollback failed");
+      return undefined;
+    });
+    await expect(captureDatabaseSnapshot(db.pool, ["books"]))
+      .rejects.toMatchObject({ stage: "snapshot-cleanup" });
+    expect(db.release).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it("discards the client when rollback exceeds the deadline", async () => {
+    vi.useFakeTimers();
+    const db = database(
+      { books },
+      (sql) => sql.includes("snapshot-relation")
+        ? new Error("read failed")
+        : undefined,
+      [],
+      (sql) => sql === "ROLLBACK"
+        ? new Promise(() => {})
+        : Promise.resolve()
+    );
+    const result = captureDatabaseSnapshot(
+      db.pool,
+      ["books"],
+      { snapshotTimeoutMs: 20 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT",
+      stage: "snapshot-cleanup"
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await expectation;
+    expect(db.release).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it("returns no snapshot and discards the client when COMMIT hangs", async () => {
+    vi.useFakeTimers();
+    const db = database(
+      { books },
+      undefined,
+      [],
+      (sql) => sql === "COMMIT"
+        ? new Promise(() => {})
+        : Promise.resolve()
+    );
+    const result = captureDatabaseSnapshot(
+      db.pool,
+      ["books"],
+      { snapshotTimeoutMs: 20 }
+    );
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "SNAPSHOT_TIMEOUT",
+      stage: "snapshot-transaction"
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await expectation;
+    expect(db.release).toHaveBeenCalledWith(expect.any(Error));
   });
 
   it("returns no partial snapshot and releases after a later table failure", async () => {
