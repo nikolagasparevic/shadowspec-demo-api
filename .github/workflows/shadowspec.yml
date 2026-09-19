@@ -134,6 +134,7 @@ jobs:
             DB_NAME=shadowspec_replay \
             SHADOWSPEC_TARGET_URL=http://127.0.0.1:3000 \
             SHADOWSPEC_TABLES=orders \
+            SHADOWSPEC_SCHEMA=public \
             SHADOWSPEC_REPLAY=true \
             SHADOWSPEC_PROJECT_ID="$SHADOWSPEC_PROJECT_ID" \
             SHADOWSPEC_REPLAY_DATABASE_ID="$replay_database_id" \

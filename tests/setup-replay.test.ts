@@ -26,6 +26,7 @@ function environment(
     SHADOWSPEC_REPLAY_TOKEN: TOKEN,
     SHADOWSPEC_REPLAY_DATABASE_NAME:
       DATABASE_NAME,
+    SHADOWSPEC_SCHEMA: "public",
     SHADOWSPEC_TABLES: tables
   };
 }
@@ -45,8 +46,14 @@ function marker() {
 function harness(
   failWhen?: (sql: string) => boolean
 ) {
-  const query = vi.fn(
-    async (sql: string) => {
+  const tableOids: Record<string, string> = {
+    parents: "101",
+    children: "102",
+    orders: "103"
+  };
+  const insertedMaximum = new Map<string, unknown>();
+  const queryImplementation =
+    async (sql: string, parameters?: unknown[]) => {
       if (failWhen?.(sql)) {
         throw new Error("injected setup failure");
       }
@@ -65,9 +72,125 @@ function harness(
         return { rows: [marker()] };
       }
 
+      if (sql.includes("shadowspec:relations")) {
+        const tables = parameters?.[1] as string[];
+        return {
+          rows: tables.map((table) => ({
+            oid: tableOids[table] ?? "999",
+            schema_name: "public",
+            table_name: table,
+            relkind: "r",
+            relpersistence: "p",
+            relrowsecurity: false,
+            has_inheritance: false
+          }))
+        };
+      }
+
+      if (sql.includes("shadowspec:columns")) {
+        const oids = parameters?.[0] as string[];
+        return {
+          rows: oids.flatMap((oid) => [
+            {
+              table_oid: oid,
+              attnum: 1,
+              attname: "id",
+              atthasdef: true,
+              attgenerated: "",
+              attidentity: "",
+              type_schema: "pg_catalog"
+            },
+            ...(oid === tableOids.children
+              ? [{
+                  table_oid: oid,
+                  attnum: 2,
+                  attname: "parent_id",
+                  atthasdef: false,
+                  attgenerated: "",
+                  attidentity: "",
+                  type_schema: "pg_catalog"
+                }]
+              : [])
+          ])
+        };
+      }
+
+      if (sql.includes("shadowspec:foreign-keys")) {
+        const oids = new Set(parameters?.[0] as string[]);
+        return {
+          rows:
+            oids.has(tableOids.parents) &&
+            oids.has(tableOids.children)
+              ? [{
+                  child_oid: tableOids.children,
+                  parent_oid: tableOids.parents,
+                  constraint_name: "children_parent_id_fkey",
+                  child_name: "public.children",
+                  parent_name: "public.parents",
+                  confdeltype: "a",
+                  confupdtype: "a",
+                  condeferrable: false,
+                  condeferred: false
+                }]
+              : []
+        };
+      }
+
+      if (
+        sql.includes("shadowspec:triggers") ||
+        sql.includes("shadowspec:rules") ||
+        sql.includes("shadowspec:constraint-executables")
+      ) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("shadowspec:owned-sequences")) {
+        const oids = parameters?.[0] as string[];
+        return {
+          rows: oids.map((oid) => ({
+            sequence_oid: String(Number(oid) + 1000),
+            sequence_schema: "public",
+            sequence_name: `table_${oid}_id_seq`,
+            table_oid: oid,
+            column_number: 1,
+            dependency_type: "a"
+          }))
+        };
+      }
+
+      if (sql.includes("shadowspec:sequence-references")) {
+        const oids = parameters?.[0] as string[];
+        return {
+          rows: oids.map((oid) => ({
+            sequence_oid: String(Number(oid) + 1000),
+            table_oid: oid,
+            column_number: 1
+          }))
+        };
+      }
+
+      if (sql.startsWith("INSERT")) {
+        const match = sql.match(/INSERT INTO "public"\."([^"]+)"/);
+        if (match) {
+          insertedMaximum.set(match[1], parameters?.[0]);
+        }
+        return { rows: [] };
+      }
+
+      if (sql.includes("SELECT MAX(")) {
+        const match = sql.match(/FROM ONLY "public"\."([^"]+)"/);
+        return {
+          rows: [{
+            max_value: match
+              ? insertedMaximum.get(match[1]) ?? null
+              : null
+          }]
+        };
+      }
+
       return { rows: [] };
-    }
-  );
+    };
+  const query = vi.fn(queryImplementation);
   const release = vi.fn();
   const client = {
     query,
@@ -78,7 +201,13 @@ function harness(
     connect
   } as unknown as ReplayPool;
 
-  return { pool, connect, query, release };
+  return {
+    pool,
+    connect,
+    query,
+    release,
+    queryImplementation
+  };
 }
 
 function sqlCalls(query: ReturnType<typeof vi.fn>) {
@@ -88,7 +217,7 @@ function sqlCalls(query: ReturnType<typeof vi.fn>) {
 }
 
 describe("guarded replay setup", () => {
-  it("uses configured order even when snapshot keys are reversed", async () => {
+  it("uses FK order even when snapshot keys are reversed", async () => {
     const test = harness();
 
     await applyReplaySetup(
@@ -109,10 +238,10 @@ describe("guarded replay setup", () => {
     );
     expect(inserts).toEqual([
       expect.stringContaining(
-        'INSERT INTO "parents"'
+        'INSERT INTO "public"."parents"'
       ),
       expect.stringContaining(
-        'INSERT INTO "children"'
+        'INSERT INTO "public"."children"'
       )
     ]);
   });
@@ -138,31 +267,28 @@ describe("guarded replay setup", () => {
     ).toBe(false);
   });
 
-  it("deduplicates tables and ignores whitespace entries", async () => {
+  it("deduplicates configured table names", async () => {
     const test = harness();
 
     await applyReplaySetup(
       { tables: {} },
       test.pool,
-      environment(
-        "parents, children, parents, , children"
-      )
+      environment("parents, children, parents, children")
     );
 
     const truncates = sqlCalls(test.query).filter(
       (sql) => sql.startsWith("TRUNCATE")
     );
-    expect(truncates).toEqual([
-      expect.stringContaining(
-        'TRUNCATE TABLE "parents"'
-      ),
-      expect.stringContaining(
-        'TRUNCATE TABLE "children"'
-      )
-    ]);
+    expect(truncates).toHaveLength(1);
+    expect(truncates[0]).toContain(
+      'ONLY "public"."parents", ONLY "public"."children"'
+    );
+    expect(truncates[0]).toContain(
+      "RESTART IDENTITY RESTRICT"
+    );
   });
 
-  it("skips missing snapshots and repairs empty configured tables", async () => {
+  it("skips missing snapshots and leaves empty-table sequences restarted", async () => {
     const test = harness();
 
     await applyReplaySetup(
@@ -177,10 +303,8 @@ describe("guarded replay setup", () => {
 
     const calls = sqlCalls(test.query);
     expect(
-      calls.filter((sql) =>
-        sql.includes("pg_get_serial_sequence")
-      )
-    ).toHaveLength(1);
+      calls.filter((sql) => sql.includes("setval"))
+    ).toHaveLength(0);
     expect(
       calls.some((sql) =>
         sql.includes("'children'")
@@ -209,7 +333,7 @@ describe("guarded replay setup", () => {
       sql.startsWith("INSERT")
     )).toHaveLength(1);
     expect(calls.filter((sql) =>
-      sql.includes("pg_get_serial_sequence")
+      sql.includes("setval")
     )).toHaveLength(1);
   });
 
@@ -237,7 +361,9 @@ describe("guarded replay setup", () => {
       "current_database()"
     );
     expect(calls[2]).toContain("FOR SHARE");
-    expect(calls[3]).toContain("TRUNCATE");
+    expect(
+      calls.findIndex((sql) => sql.startsWith("TRUNCATE"))
+    ).toBeGreaterThan(2);
     expect(calls.at(-1)).toBe("COMMIT");
     expect(poolQuery).not.toHaveBeenCalled();
     expect(test.connect).toHaveBeenCalledOnce();
@@ -246,7 +372,7 @@ describe("guarded replay setup", () => {
 
   it("rolls back a second-table failure and releases the client", async () => {
     const test = harness((sql) =>
-      sql.startsWith('INSERT INTO "children"')
+      sql.startsWith('INSERT INTO "public"."children"')
     );
 
     await expect(
@@ -254,7 +380,9 @@ describe("guarded replay setup", () => {
         {
           tables: {
             parents: { rows: [{ id: 1 }] },
-            children: { rows: [{ id: 2 }] }
+            children: {
+              rows: [{ id: 2, parent_id: 1 }]
+            }
           }
         },
         test.pool,
@@ -270,7 +398,7 @@ describe("guarded replay setup", () => {
 
   it("rolls back sequence repair failure", async () => {
     const test = harness((sql) =>
-      sql.includes("pg_get_serial_sequence")
+      sql.includes("setval")
     );
 
     await expect(
@@ -294,7 +422,7 @@ describe("guarded replay setup", () => {
     const test = harness();
     let markerReads = 0;
     test.query.mockImplementation(
-      async (sql: string) => {
+      async (sql: string, parameters?: unknown[]) => {
         if (sql.includes("current_database()")) {
           return {
             rows: [{ database_name: DATABASE_NAME }]
@@ -312,7 +440,10 @@ describe("guarded replay setup", () => {
               : []
           };
         }
-        return { rows: [] };
+        return test.queryImplementation(
+          sql,
+          parameters
+        );
       }
     );
 

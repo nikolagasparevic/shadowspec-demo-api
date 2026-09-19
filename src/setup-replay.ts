@@ -1,10 +1,16 @@
-import type { PoolClient } from "pg";
 import { pool } from "./db";
 import {
   parseReplaySafetyConfig,
   runReplayTransaction,
   type ReplayPool
 } from "./replay-safety";
+import {
+  buildTruncateStatement,
+  inspectReplayCapabilities,
+  lockReplayRelations,
+  parseReplayScope,
+  quoteIdentifier
+} from "./replay-capabilities";
 
 export type ReplayRow = Record<string, unknown>;
 
@@ -19,84 +25,48 @@ export type ReplaySetup = {
   >;
 };
 
-function getConfiguredTables(
-  environment: NodeJS.ProcessEnv = process.env
-): string[] {
-  const value =
-    environment.SHADOWSPEC_TABLES || "";
-  const seen = new Set<string>();
-
-  return value
-    .split(",")
-    .map((table) => table.trim())
-    .filter((table) => {
-      if (!table || seen.has(table)) {
-        return false;
-      }
-
-      seen.add(table);
-      return true;
-    });
-}
-
-function validateIdentifier(
-  value: string
-) {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-    throw new Error(
-      `Invalid PostgreSQL identifier: ${value}`
-    );
-  }
-}
-
-async function resetReplayDatabase(
-  client: PoolClient,
-  tables: readonly string[]
-) {
-  for (const tableName of tables) {
-    validateIdentifier(tableName);
-
-    await client.query(
-      `TRUNCATE TABLE "${tableName}"
-       RESTART IDENTITY CASCADE`
-    );
-  }
-}
-
 export async function applyReplaySetup(
   setup?: ReplaySetup,
   replayPool: ReplayPool = pool,
   environment: NodeJS.ProcessEnv = process.env
 ) {
   const config = parseReplaySafetyConfig(environment);
-  const tables = getConfiguredTables(environment);
+  const scope = parseReplayScope(environment);
 
   await runReplayTransaction(
     replayPool,
     config,
     false,
     async (client) => {
-      await resetReplayDatabase(client, tables);
+      await lockReplayRelations(client, scope);
+      const capabilities =
+        await inspectReplayCapabilities(
+          client,
+          scope,
+          setup
+        );
+
+      await client.query(
+        buildTruncateStatement(
+          capabilities.relations
+        )
+      );
 
       if (!setup?.tables) {
         return;
       }
 
-      for (const tableName of tables) {
-        const table = setup.tables[tableName];
+      for (const relation of capabilities.restoreOrder) {
+        const table = setup.tables[relation.name];
 
         if (!table) {
           continue;
         }
 
-        validateIdentifier(tableName);
-
         for (const row of table.rows) {
-          const columns = Object.keys(row);
-
-          if (columns.length === 0) {
-            continue;
-          }
+          const columns = relation.columns.map(
+            (column) => column.name
+          );
 
           const values = columns.map(
             (column) => row[column]
@@ -107,42 +77,31 @@ export async function applyReplaySetup(
           );
 
           await client.query(
-            `INSERT INTO "${tableName}"
+            `INSERT INTO ${quoteIdentifier(relation.schema)}.${quoteIdentifier(relation.name)}
           (${columns.map(
-            (column) => `"${column}"`
+            (column) => quoteIdentifier(column)
           ).join(", ")})
          VALUES (${placeholders.join(", ")})`,
             values
           );
         }
 
-        await client.query(
-          `DO $$
-       DECLARE
-         sequence_name text;
-         max_id bigint;
-       BEGIN
-         SELECT pg_get_serial_sequence(
-           '${tableName}',
-           'id'
-         )
-         INTO sequence_name;
+        for (const sequence of relation.sequences) {
+          const maximum = await client.query<{
+            max_value: string | number | null;
+          }>(
+            `SELECT MAX(${quoteIdentifier(sequence.columnName)}) AS max_value
+             FROM ONLY ${quoteIdentifier(relation.schema)}.${quoteIdentifier(relation.name)}`
+          );
+          const maxValue = maximum.rows[0]?.max_value;
 
-         IF sequence_name IS NOT NULL THEN
-           SELECT MAX(id)
-           INTO max_id
-           FROM "${tableName}";
-
-           IF max_id IS NOT NULL THEN
-             PERFORM setval(
-               sequence_name,
-               max_id,
-               true
-             );
-           END IF;
-         END IF;
-       END $$;`
-        );
+          if (maxValue !== null && maxValue !== undefined) {
+            await client.query(
+              "SELECT pg_catalog.setval($1::oid::regclass, $2, true)",
+              [sequence.oid, maxValue]
+            );
+          }
+        }
       }
     }
   );

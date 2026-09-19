@@ -28,6 +28,7 @@ function validEnvironment(): NodeJS.ProcessEnv {
     SHADOWSPEC_REPLAY_TOKEN: TOKEN,
     SHADOWSPEC_REPLAY_DATABASE_NAME:
       DATABASE_NAME,
+    SHADOWSPEC_SCHEMA: "public",
     SHADOWSPEC_TABLES: "orders"
   };
 }
@@ -52,7 +53,10 @@ type HarnessOptions = {
 };
 
 function harness(options: HarnessOptions = {}) {
-  const query = vi.fn(async (sql: string) => {
+  const query = vi.fn(async (
+    sql: string,
+    parameters?: unknown[]
+  ) => {
     if (
       options.rollbackFails &&
       sql === "ROLLBACK"
@@ -86,6 +90,71 @@ function harness(options: HarnessOptions = {}) {
           ? []
           : [options.marker ?? validMarker()]
       };
+    }
+
+    if (sql.includes("shadowspec:relations")) {
+      const tables = parameters?.[1] as string[];
+      return {
+        rows: tables.map((table) => ({
+          oid: "101",
+          schema_name: "public",
+          table_name: table,
+          relkind: "r",
+          relpersistence: "p",
+          relrowsecurity: false,
+          has_inheritance: false
+        }))
+      };
+    }
+
+    if (sql.includes("shadowspec:columns")) {
+      return {
+        rows: [{
+          table_oid: "101",
+          attnum: 1,
+          attname: "id",
+          atthasdef: true,
+          attgenerated: "",
+          attidentity: "",
+          type_schema: "pg_catalog"
+        }]
+      };
+    }
+
+    if (
+      sql.includes("shadowspec:foreign-keys") ||
+      sql.includes("shadowspec:triggers") ||
+      sql.includes("shadowspec:rules") ||
+      sql.includes("shadowspec:constraint-executables")
+    ) {
+      return { rows: [] };
+    }
+
+    if (sql.includes("shadowspec:owned-sequences")) {
+      return {
+        rows: [{
+          sequence_oid: "201",
+          sequence_schema: "public",
+          sequence_name: "orders_id_seq",
+          table_oid: "101",
+          column_number: 1,
+          dependency_type: "a"
+        }]
+      };
+    }
+
+    if (sql.includes("shadowspec:sequence-references")) {
+      return {
+        rows: [{
+          sequence_oid: "201",
+          table_oid: "101",
+          column_number: 1
+        }]
+      };
+    }
+
+    if (sql.includes("SELECT MAX(")) {
+      return { rows: [{ max_value: 1 }] };
     }
 
     return { rows: [] };
