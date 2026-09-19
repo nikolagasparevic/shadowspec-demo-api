@@ -1,347 +1,434 @@
-[
-  {
-    "id": 1,
-    "request": {
-      "method": "PATCH",
-      "path": "/orders/1",
-      "body": {
-        "status": "shipped",
-        "quantity": 10
-      },
-      "pathParams": {
-        "id": "1"
-      }
-    },
-    "expected": {
-      "status": 200,
-      "body": {
-        "status": "shipped",
-        "orderId": 1,
-        "quantity": 10,
-        "productId": 5678,
-        "customerId": 1234
-      }
-    },
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 5,
-              "product_id": 5555,
-              "customer_id": 4444
-            },
-            {
-              "id": 3,
-              "status": "created",
-              "quantity": 1,
-              "product_id": 8888,
-              "customer_id": 9999
-            },
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            }
-          ]
-        }
-      }
-    }
+{
+  "version": 2,
+  "kind": "shadowspec-scenario-bundle",
+  "input": {
+    "projectId": "8ef76468-72f9-4df4-a263-a4f88540e877",
+    "isolation": "repeatable-read",
+    "maxVisibleCaptureId": 28,
+    "captureCount": 8,
+    "captureIdsSha256": "9e16f397ed13e0c334b30fdaf4562086717752b8f17d0c73b713c63b3f2809da"
   },
-  {
-    "id": 2,
-    "request": {
-      "method": "DELETE",
-      "path": "/orders/2",
-      "body": null,
-      "pathParams": {
-        "id": "2"
-      }
-    },
-    "expected": {
-      "status": 200,
-      "body": {
-        "status": "created",
-        "orderId": 2,
-        "quantity": 5,
-        "productId": 5555,
-        "customerId": 4444
-      }
-    },
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 5,
-              "product_id": 5555,
-              "customer_id": 4444
-            },
-            {
-              "id": 3,
-              "status": "created",
-              "quantity": 1,
-              "product_id": 8888,
-              "customer_id": 9999
-            },
-            {
-              "id": 1,
-              "status": "shipped",
-              "quantity": 10,
-              "product_id": 5678,
-              "customer_id": 1234
-            }
-          ]
-        }
-      }
-    }
-  },
-  {
-    "id": 3,
-    "request": {
-      "method": "POST",
-      "path": "/orders",
-      "body": {
-        "quantity": 2,
-        "productId": 9999,
-        "customerId": 1234
-      }
-    },
-    "expected": {
-      "status": 201,
-      "body": {
-        "status": "created",
-        "orderId": 2,
-        "quantity": 2,
-        "productId": 9999,
-        "customerId": 1234
-      }
-    },
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            }
-          ]
-        }
-      }
-    }
-  },
-  {
-    "id": 4,
-    "request": {
-      "method": "GET",
-      "path": "/orders/2",
-      "body": null,
-      "pathParams": {
-        "id": "2"
-      }
-    },
-    "expected": {
-      "status": 200,
-      "body": {
-        "status": "created",
-        "orderId": 2,
-        "quantity": 2,
-        "productId": 9999,
-        "customerId": 1234
-      }
-    },
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            },
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 2,
-              "product_id": 9999,
-              "customer_id": 1234
-            }
-          ]
-        }
-      }
-    }
-  },
-  {
-    "id": 5,
-    "request": {
-      "method": "POST",
-      "path": "/orders",
-      "body": {
-        "quantity": 1,
-        "productId": 7777,
-        "customerId": 1234
-      }
-    },
-    "expected": {
-      "status": 201,
-      "body": {
-        "status": "created",
-        "orderId": 3,
-        "quantity": 1,
-        "productId": 7777,
-        "customerId": 1234
-      }
-    },
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            },
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 2,
-              "product_id": 9999,
-              "customer_id": 1234
-            }
-          ]
-        }
-      }
-    }
-  },
-  {
-    "id": 6,
-    "request": {
-      "method": "GET",
-      "path": "/orders/3",
-      "body": null,
-      "pathParams": {
-        "id": "3"
-      }
-    },
-    "expected": {
-      "status": 200,
-      "body": {
-        "status": "created",
-        "orderId": 3,
-        "quantity": 1,
-        "productId": 7777,
-        "customerId": 1234
-      }
-    },
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            },
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 2,
-              "product_id": 9999,
-              "customer_id": 1234
-            },
-            {
-              "id": 3,
-              "status": "created",
-              "quantity": 1,
-              "product_id": 7777,
-              "customer_id": 1234
-            }
-          ]
-        }
-      }
-    }
-  },
-  {
-    "id": 7,
-    "steps": [
+  "coverage": {
+    "complete": true,
+    "executableCaptures": 8,
+    "rejectedCaptures": 0,
+    "excludedCaptures": 0,
+    "checkCount": 8,
+    "dispositions": [
       {
-        "request": {
-          "method": "POST",
-          "path": "/orders",
-          "body": {
-            "quantity": 1,
-            "productId": 7777,
-            "customerId": 1234
-          }
-        },
-        "expected": {
-          "status": 201,
-          "body": {
-            "status": "created",
-            "orderId": 3,
-            "quantity": 1,
-            "productId": 7777,
-            "customerId": 1234
-          }
-        }
+        "captureId": 2,
+        "disposition": "EXECUTABLE_STANDALONE",
+        "method": "PATCH",
+        "safePath": "/orders/:id",
+        "scenarioId": 1,
+        "checkCount": 1
       },
       {
-        "request": {
-          "method": "GET",
-          "path": "/orders/3",
-          "body": null,
-          "pathParams": {
-            "id": "3"
-          }
+        "captureId": 3,
+        "disposition": "EXECUTABLE_STANDALONE",
+        "method": "DELETE",
+        "safePath": "/orders/:id",
+        "scenarioId": 2,
+        "checkCount": 1
+      },
+      {
+        "captureId": 6,
+        "disposition": "EXECUTABLE_STANDALONE",
+        "method": "POST",
+        "safePath": "/orders",
+        "scenarioId": 3,
+        "checkCount": 1
+      },
+      {
+        "captureId": 7,
+        "disposition": "EXECUTABLE_STANDALONE",
+        "method": "GET",
+        "safePath": "/orders/:id",
+        "scenarioId": 4,
+        "checkCount": 1
+      },
+      {
+        "captureId": 21,
+        "disposition": "EXECUTABLE_LIFECYCLE_STEP",
+        "method": "POST",
+        "safePath": "/orders",
+        "scenarioId": 5,
+        "step": 1,
+        "checkCount": 1
+      },
+      {
+        "captureId": 22,
+        "disposition": "EXECUTABLE_LIFECYCLE_STEP",
+        "method": "GET",
+        "safePath": "/orders/:id",
+        "scenarioId": 5,
+        "step": 2,
+        "checkCount": 1
+      },
+      {
+        "captureId": 27,
+        "disposition": "EXECUTABLE_STANDALONE",
+        "method": "POST",
+        "safePath": "/orders",
+        "scenarioId": 6,
+        "checkCount": 1
+      },
+      {
+        "captureId": 28,
+        "disposition": "EXECUTABLE_STANDALONE",
+        "method": "GET",
+        "safePath": "/orders/:id",
+        "scenarioId": 7,
+        "checkCount": 1
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "id": 1,
+      "request": {
+        "method": "PATCH",
+        "path": "/orders/1",
+        "body": {
+          "status": "shipped",
+          "quantity": 10
         },
-        "expected": {
-          "status": 200,
-          "body": {
-            "status": "created",
-            "orderId": 3,
-            "quantity": 1,
-            "productId": 7777,
-            "customerId": 1234
+        "pathParams": {
+          "id": "1"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "status": "shipped",
+          "orderId": 1,
+          "quantity": 10,
+          "productId": 5678,
+          "customerId": 1234
+        }
+      },
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 2,
+                "status": "created",
+                "quantity": 5,
+                "product_id": 5555,
+                "customer_id": 4444
+              },
+              {
+                "id": 3,
+                "status": "created",
+                "quantity": 1,
+                "product_id": 8888,
+                "customer_id": 9999
+              },
+              {
+                "id": 1,
+                "status": "created",
+                "quantity": 3,
+                "product_id": 5678,
+                "customer_id": 1234
+              }
+            ]
           }
         }
       }
-    ],
-    "setup": {
-      "tables": {
-        "orders": {
-          "rows": [
-            {
-              "id": 1,
-              "status": "created",
-              "quantity": 3,
-              "product_id": 5678,
-              "customer_id": 1234
-            },
-            {
-              "id": 2,
-              "status": "created",
-              "quantity": 2,
-              "product_id": 9999,
-              "customer_id": 1234
+    },
+    {
+      "id": 2,
+      "request": {
+        "method": "DELETE",
+        "path": "/orders/2",
+        "body": null,
+        "pathParams": {
+          "id": "2"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "status": "created",
+          "orderId": 2,
+          "quantity": 5,
+          "productId": 5555,
+          "customerId": 4444
+        }
+      },
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 2,
+                "status": "created",
+                "quantity": 5,
+                "product_id": 5555,
+                "customer_id": 4444
+              },
+              {
+                "id": 3,
+                "status": "created",
+                "quantity": 1,
+                "product_id": 8888,
+                "customer_id": 9999
+              },
+              {
+                "id": 1,
+                "status": "shipped",
+                "quantity": 10,
+                "product_id": 5678,
+                "customer_id": 1234
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "request": {
+        "method": "POST",
+        "path": "/orders",
+        "body": {
+          "quantity": 2,
+          "productId": 9999,
+          "customerId": 1234
+        }
+      },
+      "expected": {
+        "status": 201,
+        "body": {
+          "status": "created",
+          "orderId": 2,
+          "quantity": 2,
+          "productId": 9999,
+          "customerId": 1234
+        }
+      },
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 1,
+                "status": "created",
+                "quantity": 3,
+                "product_id": 5678,
+                "customer_id": 1234
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "request": {
+        "method": "GET",
+        "path": "/orders/2",
+        "body": null,
+        "pathParams": {
+          "id": "2"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "status": "created",
+          "orderId": 2,
+          "quantity": 2,
+          "productId": 9999,
+          "customerId": 1234
+        }
+      },
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 1,
+                "status": "created",
+                "quantity": 3,
+                "product_id": 5678,
+                "customer_id": 1234
+              },
+              {
+                "id": 2,
+                "status": "created",
+                "quantity": 2,
+                "product_id": 9999,
+                "customer_id": 1234
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "steps": [
+        {
+          "request": {
+            "method": "POST",
+            "path": "/orders",
+            "body": {
+              "quantity": 1,
+              "productId": 7777,
+              "customerId": 1234
             }
-          ]
+          },
+          "expected": {
+            "status": 201,
+            "body": {
+              "status": "created",
+              "orderId": 3,
+              "quantity": 1,
+              "productId": 7777,
+              "customerId": 1234
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/orders/3",
+            "body": null,
+            "pathParams": {
+              "id": "3"
+            }
+          },
+          "expected": {
+            "status": 200,
+            "body": {
+              "status": "created",
+              "orderId": 3,
+              "quantity": 1,
+              "productId": 7777,
+              "customerId": 1234
+            }
+          }
+        }
+      ],
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 1,
+                "status": "created",
+                "quantity": 3,
+                "product_id": 5678,
+                "customer_id": 1234
+              },
+              {
+                "id": 2,
+                "status": "created",
+                "quantity": 2,
+                "product_id": 9999,
+                "customer_id": 1234
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "request": {
+        "method": "POST",
+        "path": "/orders",
+        "body": {
+          "quantity": 1,
+          "productId": 7777,
+          "customerId": 1234
+        }
+      },
+      "expected": {
+        "status": 201,
+        "body": {
+          "status": "created",
+          "orderId": 3,
+          "quantity": 1,
+          "productId": 7777,
+          "customerId": 1234
+        }
+      },
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 1,
+                "status": "created",
+                "quantity": 3,
+                "product_id": 5678,
+                "customer_id": 1234
+              },
+              {
+                "id": 2,
+                "status": "created",
+                "quantity": 2,
+                "product_id": 9999,
+                "customer_id": 1234
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "request": {
+        "method": "GET",
+        "path": "/orders/3",
+        "body": null,
+        "pathParams": {
+          "id": "3"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "status": "created",
+          "orderId": 3,
+          "quantity": 1,
+          "productId": 7777,
+          "customerId": 1234
+        }
+      },
+      "setup": {
+        "tables": {
+          "orders": {
+            "rows": [
+              {
+                "id": 1,
+                "status": "created",
+                "quantity": 3,
+                "product_id": 5678,
+                "customer_id": 1234
+              },
+              {
+                "id": 2,
+                "status": "created",
+                "quantity": 2,
+                "product_id": 9999,
+                "customer_id": 1234
+              },
+              {
+                "id": 3,
+                "status": "created",
+                "quantity": 1,
+                "product_id": 7777,
+                "customer_id": 1234
+              }
+            ]
+          }
         }
       }
     }
-  }
-]
+  ],
+  "exportId": "bf2a74cb0c045cb2e17e5874bb3ed715b37beed4676f32b673293a618d715782"
+}
