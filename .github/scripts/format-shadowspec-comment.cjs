@@ -1,4 +1,7 @@
 const MARKER = "<!-- shadowspec-report -->";
+const {
+  validateRunResult
+} = require("./run-result.cjs");
 const MAX_DIFFERENCES = 10;
 const MAX_VALUE_LENGTH = 160;
 const MISSING = Symbol("missing");
@@ -270,11 +273,53 @@ function formatFailure(failure) {
   return lines.join("\n");
 }
 
-function formatShadowSpecComment(report) {
-  if (report.passed) {
+function correlationLines(result) {
+  const shortCommit = result.commitSha.slice(0, 7);
+  const displayRun = result.workflowRunId ?? result.runId;
+  return [
+    `<!-- shadowspec-run id=${result.runId} head=${result.sourceHeadSha ?? result.commitSha} workflow-run=${result.workflowRunId ?? "local"} attempt=${result.runAttempt} -->`,
+    "",
+    `Commit ${inlineCode(shortCommit)} · Run ${inlineCode(displayRun)} · Attempt ${inlineCode(result.runAttempt)}`
+  ];
+}
+
+function fatalLabel(result) {
+  const labels = {
+    safety: "Replay safety failure",
+    configuration: "Configuration failure",
+    infrastructure: "Infrastructure failure",
+    internal: "Internal failure"
+  };
+  return labels[result.fatalError.category] ?? "ShadowSpec failure";
+}
+
+function formatRunningComment(identity) {
+  const shortCommit = identity.commitSha.slice(0, 7);
+  const displayRun = identity.workflowRunId ?? identity.runId;
+  return [
+    MARKER,
+    `<!-- shadowspec-run id=${identity.runId} head=${identity.sourceHeadSha ?? identity.commitSha} workflow-run=${identity.workflowRunId ?? "local"} attempt=${identity.runAttempt} -->`,
+    "",
+    "## 🟡 ShadowSpec is running",
+    "",
+    `Commit ${inlineCode(shortCommit)} · Run ${inlineCode(displayRun)} · Attempt ${inlineCode(identity.runAttempt)}`,
+    "",
+    "---",
+    "_ShadowSpec behavioral regression check_"
+  ].join("\n");
+}
+
+function formatShadowSpecComment(value, expectedIdentity) {
+  const report = validateRunResult(value, expectedIdentity);
+  const correlation = correlationLines(report);
+
+  if (report.terminalStatus === "passed") {
     return [
       MARKER,
+      correlation[0],
       "## 🟢 ShadowSpec passed",
+      "",
+      ...correlation.slice(1),
       "",
       `**${report.passedChecks} of ${report.checks} checks passed** across **${report.scenarios} scenarios**.`,
       "",
@@ -285,9 +330,34 @@ function formatShadowSpecComment(report) {
     ].join("\n");
   }
 
+  if (report.terminalStatus !== "behavioral_failed") {
+    const completed = report.plannedChecks > 0
+      ? `${report.checks} of ${report.plannedChecks} planned checks completed.`
+      : "No behavioral checks completed.";
+    return [
+      MARKER,
+      correlation[0],
+      "## 🔴 ShadowSpec could not complete",
+      "",
+      ...correlation.slice(1),
+      "",
+      `**${fatalLabel(report)} — ${inlineCode(report.fatalError.code)}**`,
+      "",
+      escapeMarkdownText(report.fatalError.message),
+      "",
+      completed,
+      "",
+      "---",
+      "_ShadowSpec behavioral regression check_"
+    ].join("\n");
+  }
+
   const lines = [
     MARKER,
+    correlation[0],
     `## 🔴 ShadowSpec failed — ${report.failedChecks} of ${report.checks} checks failed`,
+    "",
+    ...correlation.slice(1),
     "",
     `**${report.passedChecks} passed · ${report.failedChecks} failed · ${report.scenarios} scenarios**`
   ];
@@ -306,5 +376,6 @@ function formatShadowSpecComment(report) {
 }
 
 module.exports = {
+  formatRunningComment,
   formatShadowSpecComment
 };

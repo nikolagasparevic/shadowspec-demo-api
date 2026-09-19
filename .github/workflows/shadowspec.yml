@@ -6,27 +6,75 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: shadowspec-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Configure the exact "ShadowSpec / shadowspec" job as a required branch
+  # protection check. The PR comment below is explanatory, not authoritative.
   shadowspec:
     permissions:
+      actions: read
       contents: read
       pull-requests: write
 
     runs-on: ubuntu-latest
 
+    env:
+      SHADOWSPEC_RUN_ID: ${{ github.run_id }}.${{ github.run_attempt }}.replay
+      SHADOWSPEC_REPOSITORY: ${{ github.repository }}
+      SHADOWSPEC_COMMIT_SHA: ${{ github.sha }}
+      SHADOWSPEC_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SHADOWSPEC_WORKFLOW_RUN_ID: ${{ github.run_id }}
+      SHADOWSPEC_RUN_ATTEMPT: ${{ github.run_attempt }}
+      SHADOWSPEC_PROJECT_ID: 8ef76468-72f9-4df4-a263-a4f88540e877
+
     steps:
       - name: Checkout repository
+        id: checkout
         uses: actions/checkout@v4
 
+      - name: Mark ShadowSpec as running on PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {
+              formatRunningComment
+            } = require("./.github/scripts/format-shadowspec-comment.cjs");
+            const {
+              updateShadowSpecComment
+            } = require("./.github/scripts/update-shadowspec-comment.cjs");
+            const identity = {
+              runId: process.env.SHADOWSPEC_RUN_ID,
+              repository: process.env.SHADOWSPEC_REPOSITORY,
+              commitSha: process.env.SHADOWSPEC_COMMIT_SHA,
+              sourceHeadSha: process.env.SHADOWSPEC_SOURCE_HEAD_SHA,
+              workflowRunId: process.env.SHADOWSPEC_WORKFLOW_RUN_ID,
+              runAttempt: Number(process.env.SHADOWSPEC_RUN_ATTEMPT)
+            };
+            await updateShadowSpecComment({
+              github,
+              context,
+              identity,
+              body: formatRunningComment(identity),
+              logger: console
+            });
+
       - name: Setup Node.js
+        id: setup_node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Start PostgreSQL
+        id: start_postgres
         run: docker compose up -d
 
       - name: Wait for PostgreSQL
+        id: wait_postgres
         run: |
           for i in {1..30}; do
             if docker compose exec -T postgres pg_isready -U shadowspec -d shadowspec; then
@@ -43,6 +91,7 @@ jobs:
           exit 1
 
       - name: Create replay database
+        id: create_replay_database
         run: |
           for i in {1..10}; do
             if docker compose exec -T postgres \
@@ -67,21 +116,23 @@ jobs:
             -c "CREATE DATABASE shadowspec_replay;"
 
       - name: Create production database schema
+        id: create_production_schema
         run: |
           docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec < db/schema.sql
 
       - name: Create replay database schema
+        id: create_replay_schema
         run: |
           docker compose exec -T postgres \
             psql -U shadowspec -d shadowspec_replay < db/schema.sql
 
       - name: Install dependencies
+        id: install_dependencies
         run: npm install
 
       - name: Run ShadowSpec
-        env:
-          SHADOWSPEC_PROJECT_ID: 8ef76468-72f9-4df4-a263-a4f88540e877
+        id: replay
         run: |
           replay_token="$(openssl rand -hex 32)"
           target_token="$(openssl rand -hex 32)"
@@ -130,6 +181,7 @@ jobs:
             exit 1
           fi
 
+          set +e
           env \
             DB_NAME=shadowspec_replay \
             SHADOWSPEC_TARGET_URL=http://127.0.0.1:3000 \
@@ -143,65 +195,93 @@ jobs:
             SHADOWSPEC_REPLAY_TARGET_ID="$replay_target_id" \
             SHADOWSPEC_REPLAY_TARGET_TOKEN="$target_token" \
             npx tsx src/run-replay.ts
+          replay_exit_code="$?"
+          set -e
+          echo "exit_code=$replay_exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Finalize ShadowSpec run result
+        id: finalize
+        if: always()
+        continue-on-error: true
+        env:
+          SHADOWSPEC_PREREQUISITE_FAILED: ${{ steps.checkout.outcome != 'success' || steps.setup_node.outcome != 'success' || steps.start_postgres.outcome != 'success' || steps.wait_postgres.outcome != 'success' || steps.create_replay_database.outcome != 'success' || steps.create_production_schema.outcome != 'success' || steps.create_replay_schema.outcome != 'success' || steps.install_dependencies.outcome != 'success' || (steps.replay.outcome == 'failure' && steps.replay.outputs.exit_code == '') }}
+          SHADOWSPEC_REPLAY_EXIT_CODE: ${{ steps.replay.outputs.exit_code }}
+        run: node .github/scripts/finalize-shadowspec-run.cjs
 
       - name: Comment ShadowSpec result on PR
         if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require("fs");
-
-            if (!fs.existsSync("shadowspec-report.json")) {
-              return;
-            }
-
-            const report = JSON.parse(
-              fs.readFileSync("shadowspec-report.json", "utf8")
-            );
-
             const {
               formatShadowSpecComment
             } = require("./.github/scripts/format-shadowspec-comment.cjs");
-
-            const marker = "<!-- shadowspec-report -->";
-            const body =
-              formatShadowSpecComment(report);
-
-            const comments =
-              await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number
-              });
-
-            const existingComment = comments.data.find(
-              (comment) =>
-                comment.user?.type === "Bot" &&
-                comment.body?.includes(marker)
-            );
-
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body
-              });
+            const {
+              expectedIdentityFromEnvironment,
+              getRunResultPath,
+              validateRunResult
+            } = require("./.github/scripts/run-result.cjs");
+            const {
+              updateShadowSpecComment
+            } = require("./.github/scripts/update-shadowspec-comment.cjs");
+            const identity = expectedIdentityFromEnvironment(process.env);
+            const resultPath = getRunResultPath(identity);
+            let body;
+            try {
+              const result = validateRunResult(
+                JSON.parse(fs.readFileSync(resultPath, "utf8")),
+                identity
+              );
+              body = formatShadowSpecComment(result, identity);
+            } catch (error) {
+              body = [
+                "<!-- shadowspec-report -->",
+                `<!-- shadowspec-run id=${identity.runId} head=${identity.sourceHeadSha} workflow-run=${identity.workflowRunId} attempt=${identity.runAttempt} -->`,
+                "",
+                "## 🔴 ShadowSpec could not format its result",
+                "",
+                `Commit \`${identity.commitSha.slice(0, 7)}\` · Run \`${identity.workflowRunId}\` · Attempt \`${identity.runAttempt}\``,
+                "",
+                "**Infrastructure failure — `COMMENT_FORMAT_FAILED`**",
+                "",
+                "The ShadowSpec result could not be displayed safely. See the workflow logs and run artifact when available."
+              ].join("\n");
             }
+            await updateShadowSpecComment({
+              github,
+              context,
+              identity,
+              body,
+              logger: console
+            });
 
       - name: Upload ShadowSpec report
+        id: upload_result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shadowspec-report
-          path: |
-            shadowspec-report.json
-            target.log
-          if-no-files-found: warn
+          name: shadowspec-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: shadowspec-results/shadowspec-run-${{ env.SHADOWSPEC_RUN_ID }}.json
+          if-no-files-found: error
+
+      - name: Enforce ShadowSpec result
+        if: always()
+        env:
+          FINALIZER_OUTCOME: ${{ steps.finalize.outcome }}
+          TERMINAL_STATUS: ${{ steps.finalize.outputs.terminal_status }}
+          ARTIFACT_OUTCOME: ${{ steps.upload_result.outcome }}
+        run: |
+          if [ "$FINALIZER_OUTCOME" != "success" ]; then
+            echo "ShadowSpec final result could not be validated or published."
+            exit 1
+          fi
+          if [ "$ARTIFACT_OUTCOME" != "success" ]; then
+            echo "ShadowSpec result artifact was not preserved."
+            exit 1
+          fi
+          if [ "$TERMINAL_STATUS" != "passed" ]; then
+            echo "ShadowSpec terminal status: $TERMINAL_STATUS"
+            exit 1
+          fi

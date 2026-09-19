@@ -6,12 +6,27 @@ import {
 import type {
   ShadowSpecReport
 } from "../src/report";
+import type {
+  ShadowSpecRunResult
+} from "../src/run-result";
 
 const {
+  formatRunningComment,
   formatShadowSpecComment
 }: {
+  formatRunningComment: (
+    identity: Pick<
+      ShadowSpecRunResult,
+      | "runId"
+      | "commitSha"
+      | "sourceHeadSha"
+      | "workflowRunId"
+      | "runAttempt"
+    >
+  ) => string;
   formatShadowSpecComment: (
-    report: ShadowSpecReport
+    report: ShadowSpecRunResult,
+    expectedIdentity?: Record<string, unknown>
   ) => string;
 } = require(
   "../.github/scripts/format-shadowspec-comment.cjs"
@@ -38,29 +53,70 @@ function behavioralFailure(
   };
 }
 
-function failedReport(
-  failures: ShadowSpecReport["failures"]
-): ShadowSpecReport {
+function runResult(
+  overrides: Partial<ShadowSpecRunResult> = {}
+): ShadowSpecRunResult {
   return {
-    passed: false,
-    scenarios: failures.length,
-    checks: failures.length,
-    passedChecks: 0,
-    failedChecks: failures.length,
-    failures
+    version: 1,
+    reportSource: "shadowspec-replay",
+    reportVersion: 1,
+    runId: "123.1.replay",
+    repository: "example/shadowspec",
+    commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    sourceHeadSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    workflowRunId: "123",
+    runAttempt: 1,
+    startedAt: "2026-01-01T00:00:00.000Z",
+    finishedAt: "2026-01-01T00:01:00.000Z",
+    terminalStatus: "passed",
+    scenarios: 1,
+    scenariosCompleted: 1,
+    plannedChecks: 1,
+    checks: 1,
+    passedChecks: 1,
+    failedChecks: 0,
+    behavioralFailures: 0,
+    failures: [],
+    fatalError: null,
+    ...overrides
   };
 }
 
+function failedReport(
+  failures: ShadowSpecReport["failures"]
+): ShadowSpecRunResult {
+  return runResult({
+    terminalStatus: "behavioral_failed",
+    scenarios: failures.length,
+    scenariosCompleted: failures.length,
+    plannedChecks: failures.length,
+    checks: failures.length,
+    passedChecks: 0,
+    failedChecks: failures.length,
+    behavioralFailures: failures.length,
+    failures
+  });
+}
+
 describe("formatShadowSpecComment", () => {
+  it("formats a correlated in-progress comment", () => {
+    const result = runResult();
+    const comment = formatRunningComment(result);
+    expect(comment).toContain("ShadowSpec is running");
+    expect(comment).toContain("id=123.1.replay");
+    expect(comment).toContain("Commit `aaaaaaa`");
+  });
+
   it("formats a successful report", () => {
-    const comment = formatShadowSpecComment({
-      passed: true,
+    const comment = formatShadowSpecComment(runResult({
       scenarios: 7,
+      scenariosCompleted: 7,
+      plannedChecks: 8,
       checks: 8,
       passedChecks: 8,
       failedChecks: 0,
       failures: []
-    });
+    }));
 
     expect(comment).toContain(
       "## 🟢 ShadowSpec passed"
@@ -375,33 +431,98 @@ describe("formatShadowSpecComment", () => {
     );
   });
 
-  it("supports legacy behavioral failure reports", () => {
+  it("rejects legacy behavioral failure reports", () => {
     const failure = behavioralFailure();
     delete failure.kind;
     delete failure.code;
     delete failure.message;
 
-    const comment = formatShadowSpecComment(
-      failedReport([failure])
-    );
+    const legacy = {
+      passed: false,
+      scenarios: 1,
+      checks: 1,
+      passedChecks: 0,
+      failedChecks: 1,
+      failures: [failure]
+    };
 
-    expect(comment).toContain(
-      "**Behavioral regression**"
-    );
-    expect(comment).toContain(
-      "`body.productId`"
-    );
+    expect(() => formatShadowSpecComment(
+      legacy as unknown as ShadowSpecRunResult
+    )).toThrow("unsupported fields");
+  });
+
+  it.each([
+    ["safety_failed", "safety", "Replay safety failure"],
+    ["configuration_failed", "configuration", "Configuration failure"],
+    ["infrastructure_failed", "infrastructure", "Infrastructure failure"],
+    ["internal_failed", "internal", "Internal failure"],
+    ["interrupted", "infrastructure", "Infrastructure failure"]
+  ] as const)("formats %s without behavioral-green wording", (
+    terminalStatus,
+    category,
+    label
+  ) => {
+    const comment = formatShadowSpecComment(runResult({
+      terminalStatus,
+      scenarios: 3,
+      scenariosCompleted: 2,
+      plannedChecks: 8,
+      checks: 5,
+      passedChecks: 5,
+      fatalError: {
+        category,
+        code: "SAFE_FAILURE",
+        message: "Safe diagnostic."
+      }
+    }));
+    expect(comment).toContain("ShadowSpec could not complete");
+    expect(comment).toContain(label);
+    expect(comment).toContain("5 of 8 planned checks completed");
+    expect(comment).not.toContain("No behavioral regressions detected");
+  });
+
+  it("rejects unsupported versions and identity mismatches", () => {
+    expect(() => formatShadowSpecComment(runResult({
+      version: 2 as 1
+    }))).toThrow("version, source, or terminal status");
+    expect(() => formatShadowSpecComment(
+      runResult(),
+      {
+        runId: "different",
+        repository: "example/shadowspec",
+        commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        sourceHeadSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        workflowRunId: "123",
+        runAttempt: 1
+      }
+    )).toThrow("different execution");
+  });
+
+  it("does not expose unrelated sensitive data in fatal output", () => {
+    const result = runResult({
+      terminalStatus: "internal_failed",
+      checks: 0,
+      passedChecks: 0,
+      scenariosCompleted: 0,
+      fatalError: {
+        category: "internal",
+        code: "UNEXPECTED_INTERNAL_ERROR",
+        message: "ShadowSpec encountered an unexpected internal error."
+      }
+    }) as ShadowSpecRunResult & { secret?: string };
+    result.secret = "super-secret-token";
+    expect(() => formatShadowSpecComment(result))
+      .toThrow("unsupported fields");
   });
 
   it("preserves the ShadowSpec marker", () => {
-    const comment = formatShadowSpecComment({
-      passed: true,
+    const comment = formatShadowSpecComment(runResult({
       scenarios: 1,
       checks: 1,
       passedChecks: 1,
       failedChecks: 0,
       failures: []
-    });
+    }));
 
     expect(comment.startsWith(
       "<!-- shadowspec-report -->\n"

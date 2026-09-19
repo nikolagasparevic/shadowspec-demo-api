@@ -8,14 +8,21 @@ import {
   runReplay,
   type ReplayDependencies
 } from "../src/run-replay";
-import type {
+import {
   CaptureDefinition,
+  ScenarioLoadError,
   ShadowSpecScenario,
   ShadowSpecStep
 } from "../src/load-scenarios";
 import type {
-  ShadowSpecReport
-} from "../src/report";
+  ShadowSpecRunResult
+} from "../src/run-result";
+import { RunResultError } from "../src/run-result";
+import { ReplaySafetyError } from "../src/replay-safety";
+import {
+  ReplayTargetSafetyError
+} from "../src/replay-target-safety";
+import { ReplayRequestError } from "../src/replay";
 
 type ReplayResult = {
   status: number;
@@ -105,6 +112,7 @@ async function execute(
     contents: string;
   }[] = [];
   const logs: unknown[][] = [];
+  const invalidationMock = vi.fn();
   let error: unknown;
 
   try {
@@ -115,6 +123,16 @@ async function execute(
       preflightReplaySafety: preflightMock,
       verifyReplayTarget:
         targetVerificationMock,
+      identity: {
+        runId: "test.1.replay",
+        repository: "example/shadowspec",
+        commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        sourceHeadSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        workflowRunId: "123",
+        runAttempt: 1
+      },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      invalidateReportFile: invalidationMock,
       writeReportFile: (
         path,
         contents
@@ -133,7 +151,7 @@ async function execute(
   const report = writes.length > 0
     ? JSON.parse(
         writes[writes.length - 1].contents
-      ) as ShadowSpecReport
+      ) as ShadowSpecRunResult
     : undefined;
 
   return {
@@ -144,12 +162,13 @@ async function execute(
     preflightMock,
     targetVerificationMock,
     writes,
-    logs
+    logs,
+    invalidationMock
   };
 }
 
 function expectBindingFailure(
-  report: ShadowSpecReport | undefined,
+  report: ShadowSpecRunResult | undefined,
   code: string
 ) {
   expect(report?.failures).toHaveLength(1);
@@ -162,9 +181,9 @@ function expectBindingFailure(
 
 describe("structured lifecycle binding failures", () => {
   it("performs no setup or scenario request after startup target refusal", async () => {
-    const targetError = Object.assign(
-      new Error("Replay target refused."),
-      { code: "REPLAY_TARGET_PROOF_INVALID" }
+    const targetError = new ReplayTargetSafetyError(
+      "REPLAY_TARGET_PROOF_INVALID",
+      "Replay target refused."
     );
     const result = await execute(
       [standaloneScenario()],
@@ -178,15 +197,22 @@ describe("structured lifecycle binding failures", () => {
 
     expect(result.error).toBe(targetError);
     expect(result.preflightMock).toHaveBeenCalledOnce();
+    expect(result.invalidationMock).toHaveBeenCalledWith(
+      "shadowspec-results\\shadowspec-run-test.1.replay.json"
+    );
     expect(result.setupMock).not.toHaveBeenCalled();
     expect(result.replayMock).not.toHaveBeenCalled();
-    expect(result.writes).toHaveLength(0);
+    expect(result.writes).toHaveLength(1);
+    expect(result.report).toMatchObject({
+      terminalStatus: "safety_failed",
+      fatalError: { code: "REPLAY_TARGET_PROOF_INVALID" }
+    });
   });
 
   it("performs no setup when per-scenario target verification fails", async () => {
-    const targetError = Object.assign(
-      new Error("Replay target changed."),
-      { code: "REPLAY_TARGET_ID_MISMATCH" }
+    const targetError = new ReplayTargetSafetyError(
+      "REPLAY_TARGET_ID_MISMATCH",
+      "Replay target changed."
     );
     const verify = vi.fn()
       .mockResolvedValueOnce(undefined)
@@ -201,13 +227,16 @@ describe("structured lifecycle binding failures", () => {
     expect(verify).toHaveBeenCalledTimes(2);
     expect(result.setupMock).not.toHaveBeenCalled();
     expect(result.replayMock).not.toHaveBeenCalled();
-    expect(result.writes).toHaveLength(0);
+    expect(result.writes).toHaveLength(1);
+    expect(result.report?.terminalStatus).toBe(
+      "safety_failed"
+    );
   });
 
   it("performs no setup or HTTP request after startup safety refusal", async () => {
-    const safetyError = Object.assign(
-      new Error("Replay safety check failed."),
-      { code: "REPLAY_MARKER_ROW_MISSING" }
+    const safetyError = new ReplaySafetyError(
+      "REPLAY_MARKER_ROW_MISSING",
+      "Replay safety check failed."
     );
     const result = await execute(
       [standaloneScenario()],
@@ -222,7 +251,11 @@ describe("structured lifecycle binding failures", () => {
     expect(result.error).toBe(safetyError);
     expect(result.setupMock).not.toHaveBeenCalled();
     expect(result.replayMock).not.toHaveBeenCalled();
-    expect(result.writes).toHaveLength(0);
+    expect(result.writes).toHaveLength(1);
+    expect(result.report).toMatchObject({
+      terminalStatus: "safety_failed",
+      fatalError: { code: "REPLAY_MARKER_ROW_MISSING" }
+    });
   });
 
   it("records an unresolved path reference before HTTP", async () => {
@@ -510,7 +543,7 @@ describe("structured lifecycle binding failures", () => {
     expect(result.error).toBeUndefined();
     expect(result.replayMock).toHaveBeenCalledOnce();
     expect(result.report).toMatchObject({
-      passed: true,
+      terminalStatus: "passed",
       checks: 1,
       passedChecks: 1,
       failedChecks: 0
@@ -574,7 +607,7 @@ describe("structured lifecycle binding failures", () => {
       {}
     );
     expect(result.report).toMatchObject({
-      passed: true,
+      terminalStatus: "passed",
       checks: 2,
       passedChecks: 2,
       failedChecks: 0
@@ -652,7 +685,7 @@ describe("structured lifecycle binding failures", () => {
     expect(result.setupMock).toHaveBeenCalledTimes(2);
     expect(result.writes).toHaveLength(1);
     expect(result.writes[0].path).toBe(
-      "shadowspec-report.json"
+      "shadowspec-results\\shadowspec-run-test.1.replay.json"
     );
     expect(result.report).toMatchObject({
       scenarios: 2,
@@ -792,7 +825,7 @@ describe("structured lifecycle binding failures", () => {
     );
 
     expect(result.error).toBeUndefined();
-    expect(result.report?.passed).toBe(true);
+    expect(result.report?.terminalStatus).toBe("passed");
     expect(result.replayMock).toHaveBeenCalledWith(
       "GET",
       "/orders/:id",
@@ -815,7 +848,7 @@ describe("structured lifecycle binding failures", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.report).toMatchObject({
-      passed: true,
+      terminalStatus: "passed",
       checks: 1,
       passedChecks: 1,
       failedChecks: 0,
@@ -824,9 +857,7 @@ describe("structured lifecycle binding failures", () => {
   });
 
   it("keeps network errors fatal", async () => {
-    const networkError = new Error(
-      "network unavailable"
-    );
+    const networkError = new ReplayRequestError();
     const result = await execute(
       [lifecycleScenario([step()])],
       [],
@@ -838,12 +869,16 @@ describe("structured lifecycle binding failures", () => {
     );
 
     expect(result.error).toBe(networkError);
-    expect(result.writes).toHaveLength(0);
+    expect(result.writes).toHaveLength(1);
+    expect(result.report?.terminalStatus).toBe(
+      "infrastructure_failed"
+    );
   });
 
   it("keeps database setup errors fatal", async () => {
-    const databaseError = new Error(
-      "database unavailable"
+    const databaseError = Object.assign(
+      new Error("database unavailable"),
+      { code: "08006" }
     );
     const result = await execute(
       [standaloneScenario()],
@@ -857,7 +892,10 @@ describe("structured lifecycle binding failures", () => {
 
     expect(result.error).toBe(databaseError);
     expect(result.replayMock).not.toHaveBeenCalled();
-    expect(result.writes).toHaveLength(0);
+    expect(result.writes).toHaveLength(1);
+    expect(result.report?.terminalStatus).toBe(
+      "infrastructure_failed"
+    );
   });
 
   it("keeps unexpected errors fatal", async () => {
@@ -875,7 +913,10 @@ describe("structured lifecycle binding failures", () => {
     );
 
     expect(result.error).toBe(unexpectedError);
-    expect(result.writes).toHaveLength(0);
+    expect(result.writes).toHaveLength(1);
+    expect(result.report?.terminalStatus).toBe(
+      "internal_failed"
+    );
   });
 
   it.each([
@@ -909,7 +950,7 @@ describe("structured lifecycle binding failures", () => {
     );
 
     expect(result.report).toMatchObject({
-      passed: false,
+      terminalStatus: "behavioral_failed",
       failedChecks: 1
     });
   });
@@ -948,9 +989,105 @@ describe("structured lifecycle binding failures", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.report).toMatchObject({
-      passed: true,
+      terminalStatus: "passed",
       passedChecks: 1,
       failedChecks: 0
     });
+  });
+
+  it("publishes configuration failure for malformed scenarios", async () => {
+    const error = new ScenarioLoadError();
+    const result = await execute([], [], {
+      loadScenarios: () => {
+        throw error;
+      }
+    });
+
+    expect(result.error).toBe(error);
+    expect(result.report).toMatchObject({
+      terminalStatus: "configuration_failed",
+      fatalError: {
+        code: "SCENARIO_CONFIGURATION_INVALID"
+      }
+    });
+  });
+
+  it("publishes infrastructure failure for target timeout", async () => {
+    const error = new ReplayTargetSafetyError(
+      "REPLAY_TARGET_TIMEOUT",
+      "Replay target handshake timed out."
+    );
+    const result = await execute(
+      [standaloneScenario()],
+      [],
+      {
+        verifyReplayTarget: async () => {
+          throw error;
+        }
+      }
+    );
+
+    expect(result.report).toMatchObject({
+      terminalStatus: "infrastructure_failed",
+      fatalError: { code: "REPLAY_TARGET_TIMEOUT" }
+    });
+  });
+
+  it("preserves completed checks when a later scenario fails fatally", async () => {
+    const timeout = new ReplayTargetSafetyError(
+      "REPLAY_TARGET_TIMEOUT",
+      "Replay target handshake timed out."
+    );
+    const verify = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(timeout);
+    const result = await execute(
+      [standaloneScenario(1), standaloneScenario(2)],
+      [{ status: 200, body: { status: "ok" } }],
+      { verifyReplayTarget: verify }
+    );
+
+    expect(result.report).toMatchObject({
+      terminalStatus: "infrastructure_failed",
+      scenarios: 2,
+      scenariosCompleted: 1,
+      plannedChecks: 2,
+      checks: 1,
+      passedChecks: 1,
+      failedChecks: 0,
+      fatalError: { code: "REPLAY_TARGET_TIMEOUT" }
+    });
+  });
+
+  it("publishes NO_EXECUTABLE_SCENARIOS instead of zero-check green", async () => {
+    const result = await execute([]);
+
+    expect(result.error).toBeInstanceOf(Error);
+    expect(result.report).toMatchObject({
+      terminalStatus: "configuration_failed",
+      checks: 0,
+      fatalError: { code: "NO_EXECUTABLE_SCENARIOS" }
+    });
+    expect(result.replayMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps result publication failure nonzero", async () => {
+    const writeError = new RunResultError(
+      "RUN_RESULT_WRITE_FAILED",
+      "publication failed"
+    );
+    const result = await execute(
+      [standaloneScenario()],
+      [{ status: 200, body: { status: "ok" } }],
+      {
+        writeReportFile: () => {
+          throw writeError;
+        }
+      }
+    );
+
+    expect(result.error).toBe(writeError);
+    expect(result.writes).toHaveLength(0);
   });
 });

@@ -257,6 +257,7 @@ describe("scenario export artifact publication", () => {
         verifyReplayTarget: async () => undefined,
         applyReplaySetup: async () => undefined,
         replayRequest: request,
+        invalidateReportFile: () => undefined,
         writeReportFile: () => undefined,
         log: () => undefined
       })
@@ -277,7 +278,7 @@ describe("scenario export artifact publication", () => {
     );
     const request = vi.fn();
 
-    await runReplay({
+    await expect(runReplay({
       preflightReplaySafety: async () => undefined,
       loadScenarios: () => JSON.parse(
         fs.readFileSync(paths.scenarioPath, "utf8")
@@ -285,9 +286,12 @@ describe("scenario export artifact publication", () => {
       verifyReplayTarget: async () => undefined,
       applyReplaySetup: async () => undefined,
       replayRequest: request,
+      invalidateReportFile: () => undefined,
       writeReportFile: () => undefined,
       log: () => undefined
-    });
+    })).rejects.toThrow(
+      "ShadowSpec found no executable behavioral checks."
+    );
 
     expect(request).not.toHaveBeenCalled();
   });
@@ -312,6 +316,7 @@ describe("scenario export artifact publication", () => {
       verifyReplayTarget: async () => undefined,
       applyReplaySetup: async () => undefined,
       replayRequest: request,
+      invalidateReportFile: () => undefined,
       writeReportFile: (_path, contents) => {
         reportWrites.push(contents);
       },

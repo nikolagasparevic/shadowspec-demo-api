@@ -68,11 +68,26 @@ export type ShadowSpecScenario = {
   steps?: ShadowSpecStep[];
 };
 
-export function loadScenarios(): ShadowSpecScenario[] {
-  const data = fs.readFileSync(
-    "shadowspec-scenarios.json",
-    "utf-8"
-  );
+export class ScenarioLoadError extends Error {
+  readonly name = "ScenarioLoadError";
+  readonly code = "SCENARIO_CONFIGURATION_INVALID";
 
-  return JSON.parse(data);
+  constructor(options?: ErrorOptions) {
+    super(
+      "ShadowSpec scenario configuration could not be loaded or parsed.",
+      options
+    );
+  }
+}
+
+export function loadScenarios(): ShadowSpecScenario[] {
+  try {
+    const data = fs.readFileSync(
+      "shadowspec-scenarios.json",
+      "utf-8"
+    );
+    return JSON.parse(data);
+  } catch (error) {
+    throw new ScenarioLoadError({ cause: error });
+  }
 }
