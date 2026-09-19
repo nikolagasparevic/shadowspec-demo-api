@@ -21,6 +21,15 @@ export type CapturePrimitiveType =
   | "number"
   | "boolean";
 
+export type IgnoredValueDefinition = {
+  pointer: string;
+  type: CapturePrimitiveType;
+};
+
+export type ShadowSpecComparison = {
+  ignoredValues?: IgnoredValueDefinition[];
+};
+
 export type CaptureDefinition = {
   from: "response.body";
   pointer: string;
@@ -36,6 +45,7 @@ export type ShadowSpecStep = {
   request: ShadowSpecRequest;
   expected: ShadowSpecExpected;
   dynamicFields?: string[];
+  comparison?: ShadowSpecComparison;
   capture?: Record<
     string,
     CaptureDefinition
@@ -50,6 +60,8 @@ export type ShadowSpecScenario = {
   expected: ShadowSpecExpected;
 
   dynamicFields?: string[];
+
+  comparison?: ShadowSpecComparison;
 
   setup?: ReplaySetup;
 

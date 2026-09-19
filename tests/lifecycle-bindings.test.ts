@@ -563,7 +563,7 @@ describe("lifecycle bindings", () => {
     expect(
       preflightLifecycleBindings(
         {},
-        {},
+        "production-value",
         {
           value: {
             from: "response.body",
@@ -580,7 +580,11 @@ describe("lifecycle bindings", () => {
     expect(
       preflightLifecycleBindings(
         {},
-        {},
+        {
+          "a/b": {
+            "~value": "production-value"
+          }
+        },
         {
           value: {
             from: "response.body",
@@ -601,7 +605,7 @@ describe("lifecycle bindings", () => {
       {},
       {
         previous: { $ref: "existing" },
-        current: { $ref: "newValue" }
+        newValue: { $ref: "newValue" }
       },
       {
         newValue: {
@@ -616,5 +620,66 @@ describe("lifecycle bindings", () => {
     expect(
       Array.from(bindings.entries())
     ).toEqual([["existing", 7]]);
+  });
+
+  it("requires the expected producing capture pointer to exist", () => {
+    expect(() =>
+      preflightLifecycleBindings(
+        {},
+        { status: "created" },
+        {
+          orderId: {
+            from: "response.body",
+            pointer: "/orderId",
+            type: "number"
+          }
+        },
+        new Map()
+      )
+    ).toThrowError(
+      expect.objectContaining({
+        code: "CAPTURE_SOURCE_MISSING"
+      })
+    );
+  });
+
+  it("requires the expected producing capture type to match", () => {
+    expect(() =>
+      preflightLifecycleBindings(
+        {},
+        { orderId: "12" },
+        {
+          orderId: {
+            from: "response.body",
+            pointer: "/orderId",
+            type: "number"
+          }
+        },
+        new Map()
+      )
+    ).toThrowError(
+      expect.objectContaining({
+        code: "CAPTURE_TYPE_MISMATCH"
+      })
+    );
+  });
+
+  it("keeps the same generated value exact at other response pointers", () => {
+    const comparison = compareResponses(
+      {
+        generatedId: 8372,
+        nested: { generatedId: 8372 }
+      },
+      {
+        generatedId: 12,
+        nested: { generatedId: 12 }
+      },
+      201,
+      201,
+      [],
+      ["/generatedId"]
+    );
+
+    expect(comparison.passed).toBe(false);
   });
 });

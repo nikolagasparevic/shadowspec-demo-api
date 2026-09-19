@@ -7,9 +7,11 @@ import {
 } from "vitest";
 
 import {
+  buildCandidateArtifact,
   buildScenarios,
   buildLifecycleScenarios,
-  findBestBaselineResponse
+  findBestBaselineResponse,
+  ScenarioExportError
 } from "../src/export-scenarios";
 
 describe("findBestBaselineResponse", () => {
@@ -128,6 +130,163 @@ it("prefers the first valid snapshot", () => {
 });
 
 describe("buildScenarios", () => {
+  it("exports observed business variation only as candidate diagnostics", () => {
+    const groups = [
+      {
+        id: 1,
+        method: "GET",
+        path: "/products/1",
+        pathParams: { id: "1" },
+        queryParams: {},
+        requestBody: null,
+        responses: [
+          {
+            body: {
+              status: "pending",
+              price: 10,
+              updatedAt: "one",
+              requestId: "request-one"
+            },
+            status: 200
+          },
+          {
+            body: {
+              status: "approved",
+              price: 11,
+              updatedAt: "two",
+              requestId: "request-two"
+            },
+            status: 200
+          }
+        ]
+      }
+    ];
+
+    const scenarios = buildScenarios(groups);
+    const artifact = buildCandidateArtifact(groups);
+
+    expect(scenarios[0].dynamicFields).toBeUndefined();
+    expect(
+      artifact.candidates.map(
+        ({ pointer, reason }) => ({ pointer, reason })
+      )
+    ).toEqual([
+      { pointer: "/price", reason: "value_changed" },
+      { pointer: "/requestId", reason: "value_changed" },
+      { pointer: "/status", reason: "value_changed" },
+      { pointer: "/updatedAt", reason: "value_changed" }
+    ]);
+    expect(JSON.stringify(artifact)).not.toContain(
+      "request-one"
+    );
+    expect(JSON.stringify(artifact)).not.toContain(
+      "request-two"
+    );
+  });
+
+  it("produces byte-identical deterministic candidate metadata", () => {
+    const groups = [
+      {
+        id: 1,
+        method: "GET",
+        path: "/values",
+        pathParams: {},
+        queryParams: {},
+        requestBody: null,
+        responses: [
+          { body: { z: 1, a: 1 }, status: 200 },
+          { body: { z: 2, a: 2 }, status: 200 }
+        ]
+      }
+    ];
+
+    expect(
+      JSON.stringify(buildCandidateArtifact(groups))
+    ).toBe(
+      JSON.stringify(buildCandidateArtifact(groups))
+    );
+    expect(
+      buildCandidateArtifact(groups).candidates.map(
+        (candidate) => candidate.pointer
+      )
+    ).toEqual(["/a", "/z"]);
+  });
+
+  it("rejects sanitized response fields instead of masking them", () => {
+    expect(() =>
+      buildScenarios([
+        {
+          id: 1,
+          method: "GET",
+          path: "/profile",
+          pathParams: {},
+          queryParams: {},
+          requestBody: null,
+          responses: [
+            {
+              body: {
+                name: "Ada",
+                token: "secret"
+              },
+              status: 200
+            }
+          ]
+        }
+      ])
+    ).toThrowError(
+      expect.objectContaining<Partial<ScenarioExportError>>({
+        code: "SANITIZED_RESPONSE_FIELD_UNSUPPORTED"
+      })
+    );
+  });
+
+  it("keeps state-derived evidence diagnostic-only", () => {
+    const groups = [
+      {
+        id: 1,
+        method: "GET",
+        path: "/orders/2",
+        pathParams: { id: "2" },
+        queryParams: {},
+        requestBody: null,
+        responses: [
+          {
+            body: { status: "pending" },
+            status: 200,
+            snapshot: {
+              tables: {
+                orders: {
+                  rows: [{ id: 2, status: "pending" }]
+                }
+              }
+            }
+          },
+          {
+            body: { status: "approved" },
+            status: 200,
+            snapshot: {
+              tables: {
+                orders: {
+                  rows: [{ id: 2, status: "approved" }]
+                }
+              }
+            }
+          }
+        ]
+      }
+    ];
+
+    expect(buildScenarios(groups)[0].dynamicFields)
+      .toBeUndefined();
+    expect(buildCandidateArtifact(groups).candidates)
+      .toMatchObject([
+        {
+          pointer: "/status",
+          reason: "correlated_with_snapshot"
+        }
+      ]);
+  });
+
   it("builds a scenario from a grouped response", () => {
     const result = buildScenarios([
       {
@@ -423,6 +582,44 @@ describe("buildScenarios", () => {
 });
 
 describe("buildLifecycleScenarios", () => {
+  it("rejects sanitized lifecycle response fields instead of masking them", () => {
+    expect(() =>
+      buildLifecycleScenarios([
+        {
+          sessionId: "sensitive-response",
+          requests: [
+            {
+              id: 1,
+              sessionId: "sensitive-response",
+              method: "POST",
+              path: "/sessions",
+              pathParams: {},
+              queryParams: {},
+              requestBody: null,
+              responseBody: { token: "secret" },
+              responseStatus: 201
+            },
+            {
+              id: 2,
+              sessionId: "sensitive-response",
+              method: "GET",
+              path: "/sessions/1",
+              pathParams: { id: "1" },
+              queryParams: {},
+              requestBody: null,
+              responseBody: { status: "active" },
+              responseStatus: 200
+            }
+          ]
+        }
+      ])
+    ).toThrowError(
+      expect.objectContaining({
+        code: "SANITIZED_RESPONSE_FIELD_UNSUPPORTED"
+      })
+    );
+  });
+
   it("builds a multi-step scenario from a session sequence", () => {
     const result =
       buildLifecycleScenarios([

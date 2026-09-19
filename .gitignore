@@ -1,4 +1,5 @@
 shadowspec-report.json
+shadowspec-candidates.json
 dist/
 node_modules/.kilo/
 .vscode/

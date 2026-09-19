@@ -28,7 +28,6 @@ export type InferenceScenarioStep = {
     status: number;
     body: unknown;
   };
-  dynamicFields?: string[];
   capture?: Record<
     string,
     CaptureDefinition

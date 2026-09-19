@@ -9,6 +9,7 @@ import {
 import { applyReplaySetup } from "./setup-replay";
 import { preflightReplaySafety } from "./replay-safety";
 import { verifyReplayTarget } from "./replay-target-safety";
+import { validateScenarios } from "./scenario-validation";
 import {
   captureBindings,
   LifecycleBindingError,
@@ -59,10 +60,13 @@ export async function runReplay(
     ShadowSpecReport["failures"] = [];
 
   await dependencies.preflightReplaySafety();
-  await dependencies.verifyReplayTarget();
 
   const scenarios =
     dependencies.loadScenarios();
+
+  validateScenarios(scenarios);
+
+  await dependencies.verifyReplayTarget();
 
   if (scenarios.length === 0) {
     dependencies.log("No scenarios found.");
@@ -84,8 +88,7 @@ export async function runReplay(
       {
         request: scenario.request,
         expected: scenario.expected,
-        dynamicFields:
-          scenario.dynamicFields ?? []
+        comparison: scenario.comparison
       }
     ];
 
@@ -151,7 +154,7 @@ export async function runReplay(
           result.body,
           step.expected.status,
           result.status,
-          step.dynamicFields ?? [],
+          step.comparison?.ignoredValues ?? [],
           capturePointers
         );
 

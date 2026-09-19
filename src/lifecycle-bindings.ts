@@ -2,6 +2,11 @@ import type {
   BindingReference,
   CaptureDefinition
 } from "./load-scenarios";
+import {
+  extractJsonPointerValue,
+  getJsonPointerTokens,
+  JsonPointerSyntaxError
+} from "./json-pointer";
 
 export type BindingValue =
   | string
@@ -33,39 +38,21 @@ export class LifecycleBindingError extends Error {
   }
 }
 
-function decodePointerToken(
-  token: string
-): string {
-  if (/~(?:[^01]|$)/.test(token)) {
-    throw new LifecycleBindingError(
-      "INVALID_JSON_POINTER",
-      `Invalid JSON Pointer token: ${token}`
-    );
-  }
-
-  return token
-    .replace(/~1/g, "/")
-    .replace(/~0/g, "~");
-}
-
 function getPointerTokens(
   pointer: string
 ): string[] {
-  if (pointer === "") {
-    return [];
-  }
+  try {
+    return getJsonPointerTokens(pointer);
+  } catch (error) {
+    if (!(error instanceof JsonPointerSyntaxError)) {
+      throw error;
+    }
 
-  if (!pointer.startsWith("/")) {
     throw new LifecycleBindingError(
       "INVALID_JSON_POINTER",
-      `Invalid JSON Pointer: ${pointer}`
+      error.message
     );
   }
-
-  return pointer
-    .slice(1)
-    .split("/")
-    .map(decodePointerToken);
 }
 
 function validateCaptureDefinition(
@@ -92,6 +79,40 @@ function validateCaptureDefinition(
   getPointerTokens(definition.pointer);
 }
 
+function validateExpectedCaptureSource(
+  name: string,
+  definition: CaptureDefinition,
+  expectedBody: unknown
+) {
+  const extracted = extractJsonPointer(
+    expectedBody,
+    definition.pointer
+  );
+
+  if (!extracted.found) {
+    throw new LifecycleBindingError(
+      "CAPTURE_SOURCE_MISSING",
+      `ShadowSpec capture "${name}" could not find expected response body pointer "${definition.pointer}".`
+    );
+  }
+
+  if (
+    isBindingReference(extracted.value) &&
+    extracted.value.$ref === name
+  ) {
+    return;
+  }
+
+  if (
+    typeof extracted.value !== definition.type
+  ) {
+    throw new LifecycleBindingError(
+      "CAPTURE_TYPE_MISMATCH",
+      `ShadowSpec capture "${name}" expected the production response to contain ${definition.type} at "${definition.pointer}", but received ${typeof extracted.value}.`
+    );
+  }
+}
+
 export function extractJsonPointer(
   value: unknown,
   pointer: string
@@ -99,34 +120,21 @@ export function extractJsonPointer(
   found: boolean;
   value?: unknown;
 } {
-  let current = value;
-
-  for (const token of getPointerTokens(pointer)) {
-    if (
-      current === null ||
-      typeof current !== "object"
-    ) {
-      return { found: false };
+  try {
+    return extractJsonPointerValue(
+      value,
+      pointer
+    );
+  } catch (error) {
+    if (!(error instanceof JsonPointerSyntaxError)) {
+      throw error;
     }
 
-    if (
-      !Object.prototype.hasOwnProperty.call(
-        current,
-        token
-      )
-    ) {
-      return { found: false };
-    }
-
-    current = (
-      current as Record<string, unknown>
-    )[token];
+    throw new LifecycleBindingError(
+      "INVALID_JSON_POINTER",
+      error.message
+    );
   }
-
-  return {
-    found: true,
-    value: current
-  };
 }
 
 export function captureBindings(
@@ -324,6 +332,12 @@ export function preflightLifecycleBindings(
       definition,
       bindings
     );
+
+    validateExpectedCaptureSource(
+      name,
+      definition,
+      expectedBody
+    );
   }
 
   const availableBindings = new Set([
@@ -349,57 +363,4 @@ export function preflightLifecycleBindings(
   );
 
   return resolvedPathParams;
-}
-
-function omitJsonPointer(
-  value: unknown,
-  pointer: string
-): unknown {
-  const tokens = getPointerTokens(pointer);
-
-  if (tokens.length === 0) {
-    return undefined;
-  }
-
-  const clone = structuredClone(value);
-  let current = clone;
-
-  for (
-    let index = 0;
-    index < tokens.length - 1;
-    index++
-  ) {
-    if (
-      current === null ||
-      typeof current !== "object"
-    ) {
-      return clone;
-    }
-
-    current = (
-      current as Record<string, unknown>
-    )[tokens[index]];
-  }
-
-  if (
-    current !== null &&
-    typeof current === "object"
-  ) {
-    delete (
-      current as Record<string, unknown>
-    )[tokens[tokens.length - 1]];
-  }
-
-  return clone;
-}
-
-export function omitJsonPointers(
-  value: unknown,
-  pointers: string[]
-): unknown {
-  return pointers.reduce(
-    (result, pointer) =>
-      omitJsonPointer(result, pointer),
-    value
-  );
 }

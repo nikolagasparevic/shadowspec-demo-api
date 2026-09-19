@@ -1,98 +1,242 @@
-function getFieldValues(
-  value: any,
-  currentPath = ""
-): Map<string, any[]> {
-  const result = new Map<string, any[]>();
+import { canonicalStringify } from "./canonical";
+import { escapeJsonPointerToken } from "./json-pointer";
+
+export type DynamicCandidateReason =
+  | "value_changed"
+  | "presence_changed"
+  | "type_changed"
+  | "correlated_with_snapshot";
+
+export type DynamicCandidate = {
+  pointer: string;
+  reason: DynamicCandidateReason;
+  observedTypes: string[];
+  presentCount: number;
+  captureCount: number;
+  distinctValueCount: number;
+};
+
+type Observation = {
+  present: boolean;
+  value?: unknown;
+};
+
+function observedType(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
 
   if (Array.isArray(value)) {
-    return result;
+    return "array";
   }
 
-  if (value !== null && typeof value === "object") {
-    for (const [key, childValue] of Object.entries(value)) {
-      const path = currentPath
-        ? `${currentPath}.${key}`
-        : key;
-
-      if (
-        childValue !== null &&
-        typeof childValue === "object" &&
-        !Array.isArray(childValue)
-      ) {
-        const nested = getFieldValues(
-          childValue,
-          path
-        );
-
-        for (const [nestedPath, values] of nested) {
-          const existing =
-            result.get(nestedPath) ?? [];
-
-          result.set(nestedPath, [
-            ...existing,
-            ...values
-          ]);
-        }
-
-        continue;
-      }
-
-      const existing = result.get(path) ?? [];
-
-      result.set(path, [
-        ...existing,
-        childValue
-      ]);
-    }
-  }
-
-  return result;
+  return typeof value;
 }
 
-export function detectDynamicFields(
-  responses: any[]
-): string[] {
+function childPointer(
+  pointer: string,
+  token: string
+): string {
+  return `${pointer}/${escapeJsonPointerToken(token)}`;
+}
+
+function candidateFor(
+  pointer: string,
+  observations: Observation[]
+): DynamicCandidate | undefined {
+  const present = observations.filter(
+    (observation) => observation.present
+  );
+  const observedTypes = Array.from(
+    new Set(
+      present.map((observation) =>
+        observedType(observation.value)
+      )
+    )
+  ).sort();
+  const distinctValueCount = new Set(
+    present.map((observation) =>
+      canonicalStringify(observation.value)
+    )
+  ).size;
+
+  if (present.length !== observations.length) {
+    return {
+      pointer,
+      reason: "presence_changed",
+      observedTypes,
+      presentCount: present.length,
+      captureCount: observations.length,
+      distinctValueCount
+    };
+  }
+
+  if (observedTypes.length > 1) {
+    return {
+      pointer,
+      reason: "type_changed",
+      observedTypes,
+      presentCount: present.length,
+      captureCount: observations.length,
+      distinctValueCount
+    };
+  }
+
+  const onlyType = observedTypes[0];
+
+  if (onlyType === "object") {
+    const keys = Array.from(
+      new Set(
+        present.flatMap((observation) =>
+          Object.keys(
+            observation.value as Record<
+              string,
+              unknown
+            >
+          )
+        )
+      )
+    ).sort();
+
+    return keys.length === 0 &&
+      distinctValueCount > 1
+      ? {
+          pointer,
+          reason: "value_changed",
+          observedTypes,
+          presentCount: present.length,
+          captureCount: observations.length,
+          distinctValueCount
+        }
+      : undefined;
+  }
+
+  if (onlyType === "array") {
+    return undefined;
+  }
+
+  if (distinctValueCount > 1) {
+    return {
+      pointer,
+      reason: "value_changed",
+      observedTypes,
+      presentCount: present.length,
+      captureCount: observations.length,
+      distinctValueCount
+    };
+  }
+
+  return undefined;
+}
+
+function collectCandidates(
+  pointer: string,
+  observations: Observation[],
+  candidates: DynamicCandidate[]
+) {
+  const candidate = candidateFor(
+    pointer,
+    observations
+  );
+
+  if (candidate) {
+    candidates.push(candidate);
+    return;
+  }
+
+  const present = observations.filter(
+    (observation) => observation.present
+  );
+
+  if (present.length !== observations.length) {
+    return;
+  }
+
+  const values = present.map(
+    (observation) => observation.value
+  );
+
+  if (
+    values.every(
+      (value) =>
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+    )
+  ) {
+    const keys = Array.from(
+      new Set(
+        values.flatMap((value) =>
+          Object.keys(
+            value as Record<string, unknown>
+          )
+        )
+      )
+    ).sort();
+
+    for (const key of keys) {
+      collectCandidates(
+        childPointer(pointer, key),
+        values.map((value) => {
+          const record =
+            value as Record<string, unknown>;
+          return Object.prototype.hasOwnProperty.call(
+            record,
+            key
+          )
+            ? { present: true, value: record[key] }
+            : { present: false };
+        }),
+        candidates
+      );
+    }
+
+    return;
+  }
+
+  if (values.every(Array.isArray)) {
+    const maxLength = Math.max(
+      ...values.map((value) => value.length),
+      0
+    );
+
+    for (let index = 0; index < maxLength; index++) {
+      collectCandidates(
+        childPointer(pointer, String(index)),
+        values.map((value) =>
+          index < value.length
+            ? { present: true, value: value[index] }
+            : { present: false }
+        ),
+        candidates
+      );
+    }
+  }
+}
+
+export function detectDynamicCandidates(
+  responses: unknown[]
+): DynamicCandidate[] {
   if (responses.length < 2) {
     return [];
   }
 
-  const hasArrayResponses = responses.some(
-    (response) => Array.isArray(response)
+  const candidates: DynamicCandidate[] = [];
+
+  collectCandidates(
+    "",
+    responses.map((value) => ({
+      present: true,
+      value
+    })),
+    candidates
   );
 
-  if (hasArrayResponses) {
-    return [];
-  }
-
-  const fieldValues = new Map<string, any[]>();
-
-  for (const response of responses) {
-    const fields = getFieldValues(response);
-
-    for (const [field, values] of fields) {
-      const existing =
-        fieldValues.get(field) ?? [];
-
-      fieldValues.set(field, [
-        ...existing,
-        ...values
-      ]);
-    }
-  }
-
-  const dynamicFields: string[] = [];
-
-  for (const [field, values] of fieldValues) {
-    const uniqueValues = new Set(
-      values.map((value) =>
-        JSON.stringify(value)
-      )
-    );
-
-    if (uniqueValues.size > 1) {
-      dynamicFields.push(field);
-    }
-  }
-
-  return dynamicFields;
+  return candidates.sort((left, right) =>
+    left.pointer < right.pointer
+      ? -1
+      : left.pointer > right.pointer
+        ? 1
+        : 0
+  );
 }

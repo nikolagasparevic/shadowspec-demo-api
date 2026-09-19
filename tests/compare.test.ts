@@ -5,139 +5,224 @@ import {
 } from "../src/compare";
 
 describe("normalizeResponse", () => {
-  it("sorts object keys recursively", () => {
-    const result = normalizeResponse({
-      z: 1,
-      nested: {
-        b: 2,
-        a: 1
-      },
-      a: 3
-    });
-
-    expect(result).toEqual({
+  it("sorts object keys recursively without masking values", () => {
+    expect(
+      normalizeResponse({
+        z: 1,
+        nested: { b: 2, a: 1 },
+        a: 3
+      })
+    ).toEqual({
       a: 3,
-      nested: {
-        a: 1,
-        b: 2
-      },
+      nested: { a: 1, b: 2 },
       z: 1
-    });
-  });
-
-  it("removes dynamic fields", () => {
-    const result = normalizeResponse(
-      {
-        orderId: 123,
-        customerId: 456,
-        status: "created"
-      },
-      ["orderId"]
-    );
-
-    expect(result).toEqual({
-      customerId: 456,
-      status: "created"
-    });
-  });
-
-  it("removes dynamic fields from nested objects", () => {
-    const result = normalizeResponse(
-      {
-        order: {
-          id: 123,
-          status: "created"
-        }
-      },
-      ["id"]
-    );
-
-    expect(result).toEqual({
-      order: {
-        status: "created"
-      }
     });
   });
 });
 
 describe("compareResponses", () => {
-  it("passes identical responses", () => {
-    const result = compareResponses(
-      {
-        orderId: 1,
-        quantity: 10,
-        status: "shipped"
-      },
-      {
-        orderId: 1,
-        quantity: 10,
-        status: "shipped"
-      },
+  const compare = (
+    expected: unknown,
+    actual: unknown,
+    ignoredValues: {
+      pointer: string;
+      type: "string" | "number" | "boolean";
+    }[] = []
+  ) =>
+    compareResponses(
+      expected,
+      actual,
       200,
-      200
+      200,
+      ignoredValues
     );
 
-    expect(result.passed).toBe(true);
-    expect(result.differences).toEqual([]);
+  it("compares root objects independent of key order", () => {
+    expect(
+      compare({ a: 1, b: 2 }, { b: 2, a: 1 })
+        .passed
+    ).toBe(true);
   });
 
-  it("ignores dynamic fields", () => {
-    const result = compareResponses(
-      {
-        orderId: 1,
-        quantity: 10
-      },
-      {
-        orderId: 999,
-        quantity: 10
-      },
-      200,
-      200,
-      ["orderId"]
-    );
-
-    expect(result.passed).toBe(true);
-    expect(result.differences).toEqual([]);
+  it("compares root arrays and nested arrays exactly", () => {
+    expect(
+      compare(
+        [{ values: [1, 2] }],
+        [{ values: [1, 2] }]
+      ).passed
+    ).toBe(true);
+    expect(
+      compare(
+        [{ values: [1, 2] }],
+        [{ values: [2, 1] }]
+      ).passed
+    ).toBe(false);
   });
 
-  it("detects response body differences", () => {
-    const result = compareResponses(
-      {
-        quantity: 10,
-        status: "shipped"
-      },
-      {
-        quantity: 5,
-        status: "shipped"
-      },
-      200,
-      200
-    );
+  it.each([
+    [{ value: 1 }, { value: 1, added: true }],
+    [{ value: 1, removed: true }, { value: 1 }],
+    [{ value: null }, {}],
+    [{ value: 1 }, { value: "1" }],
+    [[1], [1, 2]]
+  ])("detects structural or type differences", (expected, actual) => {
+    expect(compare(expected, actual).passed).toBe(false);
+  });
 
-    expect(result.passed).toBe(false);
-    expect(result.differences).toEqual([
+  it("allows only an approved primitive value to differ", () => {
+    const result = compare(
       {
-        field: "body",
-        expected: {
-          quantity: 10,
-          status: "shipped"
-        },
-        actual: {
-          quantity: 5,
-          status: "shipped"
+        data: {
+          requestId: "production",
+          status: "created"
         }
-      }
-    ]);
+      },
+      {
+        data: {
+          requestId: "replay",
+          status: "created"
+        }
+      },
+      [{ pointer: "/data/requestId", type: "string" }]
+    );
+
+    expect(result.passed).toBe(true);
   });
 
-  it("detects HTTP status differences", () => {
+  it("does not ignore siblings or the same key elsewhere", () => {
+    const ignored = [
+      { pointer: "/requestId", type: "string" as const }
+    ];
+
+    expect(
+      compare(
+        {
+          requestId: "one",
+          sibling: "stable",
+          nested: { requestId: "stable" }
+        },
+        {
+          requestId: "two",
+          sibling: "changed",
+          nested: { requestId: "stable" }
+        },
+        ignored
+      ).passed
+    ).toBe(false);
+
+    expect(
+      compare(
+        {
+          requestId: "one",
+          nested: { requestId: "stable" }
+        },
+        {
+          requestId: "two",
+          nested: { requestId: "changed" }
+        },
+        ignored
+      ).passed
+    ).toBe(false);
+  });
+
+  it("supports exact array indexes and escaped pointer tokens", () => {
+    expect(
+      compare(
+        {
+          items: [
+            { id: 1 },
+            { id: 2 }
+          ],
+          "a/b": "one",
+          "a~b": "one"
+        },
+        {
+          items: [
+            { id: 99 },
+            { id: 2 }
+          ],
+          "a/b": "two",
+          "a~b": "two"
+        },
+        [
+          { pointer: "/items/0/id", type: "number" },
+          { pointer: "/a~1b", type: "string" },
+          { pointer: "/a~0b", type: "string" }
+        ]
+      ).passed
+    ).toBe(true);
+  });
+
+  it("fails when an ignored pointer is missing from actual", () => {
+    expect(
+      compare(
+        { requestId: "one" },
+        {},
+        [{ pointer: "/requestId", type: "string" }]
+      ).passed
+    ).toBe(false);
+  });
+
+  it("fails when an ignored value changes type", () => {
+    expect(
+      compare(
+        { requestId: "one" },
+        { requestId: 2 },
+        [{ pointer: "/requestId", type: "string" }]
+      ).passed
+    ).toBe(false);
+  });
+
+  it.each([
+    ["requestId", "INVALID_IGNORED_VALUE_POINTER"],
+    ["", "INVALID_IGNORED_VALUE_POINTER"]
+  ])("rejects invalid ignored pointer %s", (pointer, code) => {
+    expect(() =>
+      compare(
+        { requestId: "one" },
+        { requestId: "two" },
+        [{ pointer, type: "string" }]
+      )
+    ).toThrowError(
+      expect.objectContaining({ code })
+    );
+  });
+
+  it("rejects container ignored-value targets", () => {
+    expect(() =>
+      compare(
+        { data: { id: 1 } },
+        { data: { id: 2 } },
+        [{ pointer: "/data", type: "string" }]
+      )
+    ).toThrowError(
+      expect.objectContaining({
+        code: "IGNORED_VALUE_TARGET_INVALID"
+      })
+    );
+  });
+
+  it("rejects overlapping ignored-value pointers", () => {
+    expect(() =>
+      compare(
+        { data: { id: "one" } },
+        { data: { id: "two" } },
+        [
+          { pointer: "/data", type: "string" },
+          { pointer: "/data/id", type: "string" }
+        ]
+      )
+    ).toThrowError(
+      expect.objectContaining({
+        code: "OVERLAPPING_IGNORED_VALUES"
+      })
+    );
+  });
+
+  it("still compares HTTP status exactly", () => {
     const result = compareResponses(
-      {
-        message: "ok"
-      },
-      {
-        message: "ok"
-      },
+      { ok: true },
+      { ok: true },
       200,
       404
     );
@@ -148,21 +233,5 @@ describe("compareResponses", () => {
       expected: 200,
       actual: 404
     });
-  });
-
-  it("detects both body and status differences", () => {
-    const result = compareResponses(
-      {
-        status: "created"
-      },
-      {
-        status: "deleted"
-      },
-      201,
-      200
-    );
-
-    expect(result.passed).toBe(false);
-    expect(result.differences).toHaveLength(2);
   });
 });

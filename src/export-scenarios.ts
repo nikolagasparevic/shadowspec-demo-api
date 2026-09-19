@@ -1,4 +1,9 @@
 import fs from "fs";
+import {
+  createHash,
+  randomUUID
+} from "node:crypto";
+import path from "node:path";
 import { canonicalStringify } from "./canonical";
 import {
   getScenarioGroups,
@@ -6,12 +11,21 @@ import {
   buildScenarioSequences
 } from "./scenario";
 import { sanitizeObject } from "./sanitize";
-import { detectDynamicFields } from "./dynamic-fields";
+import {
+  detectDynamicCandidates,
+  type DynamicCandidate
+} from "./dynamic-fields";
 import {
   hasValidSnapshot,
   isStateDerivedField
 } from "./state-derived";
+import {
+  escapeJsonPointerToken,
+  getJsonPointerTokens
+} from "./json-pointer";
 import type { ScenarioResponse } from "./scenario-types";
+import type { ShadowSpecScenario } from "./load-scenarios";
+import { validateScenarios } from "./scenario-validation";
 import {
   inferLifecycleBindings,
   type InferenceLifecycleScenario,
@@ -36,16 +50,149 @@ type ExportedScenario = {
     status: number;
     body: unknown;
   };
-  dynamicFields?: string[];
   setup?: unknown;
 };
 
 type ExportedLifecycleScenario =
   InferenceLifecycleScenario;
 
+export type CandidateDiagnostic =
+  DynamicCandidate & {
+    scenarioId: number;
+    scenarioKey: string;
+    method: string;
+    path: string;
+  };
+
+export type CandidateArtifact = {
+  version: 1;
+  candidates: CandidateDiagnostic[];
+};
+
+export class ScenarioExportError extends Error {
+  readonly name = "ScenarioExportError";
+
+  constructor(
+    readonly code:
+      "SANITIZED_RESPONSE_FIELD_UNSUPPORTED",
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+export class ScenarioArtifactError extends Error {
+  readonly name = "ScenarioArtifactError";
+
+  constructor(
+    readonly code:
+      | "ARTIFACT_INVALIDATION_FAILED"
+      | "ARTIFACT_WRITE_FAILED",
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+  }
+}
+
+type ExportFileSystem = Pick<
+  typeof fs,
+  | "openSync"
+  | "writeFileSync"
+  | "fsyncSync"
+  | "closeSync"
+  | "renameSync"
+  | "unlinkSync"
+>;
+
+export type ScenarioExportDependencies = {
+  scenarioPath?: string;
+  candidatePath?: string;
+  fileSystem?: ExportFileSystem;
+  getScenarioGroups?: typeof getScenarioGroups;
+  getCapturedRequests?: typeof getCapturedRequests;
+  log?: (message: string) => void;
+};
+
+function invalidateArtifact(
+  artifactPath: string,
+  fileSystem: ExportFileSystem
+): void {
+  try {
+    fileSystem.unlinkSync(artifactPath);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return;
+    }
+
+    throw new ScenarioArtifactError(
+      "ARTIFACT_INVALIDATION_FAILED",
+      `ShadowSpec could not invalidate the previous export artifact at "${artifactPath}".`,
+      { cause: error }
+    );
+  }
+}
+
+export function writeJsonAtomically(
+  artifactPath: string,
+  value: unknown,
+  fileSystem: ExportFileSystem = fs
+): void {
+  const directory = path.dirname(artifactPath);
+  const temporaryPath = path.join(
+    directory,
+    `.${path.basename(artifactPath)}.${process.pid}.${randomUUID()}.tmp`
+  );
+  let descriptor: number | undefined;
+
+  try {
+    descriptor = fileSystem.openSync(
+      temporaryPath,
+      "wx"
+    );
+    fileSystem.writeFileSync(
+      descriptor,
+      JSON.stringify(value, null, 2)
+    );
+    fileSystem.fsyncSync(descriptor);
+    fileSystem.closeSync(descriptor);
+    descriptor = undefined;
+    fileSystem.renameSync(
+      temporaryPath,
+      artifactPath
+    );
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try {
+        fileSystem.closeSync(descriptor);
+      } catch {
+        // Preserve the original artifact failure.
+      }
+    }
+
+    try {
+      fileSystem.unlinkSync(temporaryPath);
+    } catch {
+      // The temp file may not exist or may already have been renamed.
+    }
+
+    throw new ScenarioArtifactError(
+      "ARTIFACT_WRITE_FAILED",
+      `ShadowSpec could not publish the export artifact at "${artifactPath}".`,
+      { cause: error }
+    );
+  }
+}
+
 function getSanitizedFields(
   original: unknown,
-  sanitized: unknown
+  sanitized: unknown,
+  pointer = ""
 ): string[] {
   const fields = new Set<string>();
 
@@ -62,7 +209,8 @@ function getSanitizedFields(
       const nestedFields =
         getSanitizedFields(
           original[i],
-          sanitized[i]
+          sanitized[i],
+          `${pointer}/${i}`
         );
 
       for (const field of nestedFields) {
@@ -94,14 +242,17 @@ function getSanitizedFields(
           key
         )
       ) {
-        fields.add(key);
+        fields.add(
+          `${pointer}/${escapeJsonPointerToken(key)}`
+        );
         continue;
       }
 
       const nestedFields =
         getSanitizedFields(
           originalRecord[key],
-          sanitizedRecord[key]
+          sanitizedRecord[key],
+          `${pointer}/${escapeJsonPointerToken(key)}`
         );
 
       for (const field of nestedFields) {
@@ -124,66 +275,61 @@ export function findBestBaselineResponse(
   );
 }
 
+type GroupedResponses = {
+  method: string;
+  path: string;
+  pathParams: Record<string, string>;
+  queryParams: Record<string, string>;
+  requestBody: unknown;
+  responseStatus: number;
+  responses: ScenarioResponse[];
+};
+
+function groupResponses(
+  scenarioGroups: Awaited<
+    ReturnType<typeof getScenarioGroups>
+  >
+): GroupedResponses[] {
+  const grouped = new Map<string, GroupedResponses>();
+
+  for (const group of scenarioGroups) {
+    for (const response of group.responses) {
+      const key = canonicalStringify([
+        group.method,
+        group.path,
+        group.pathParams,
+        group.queryParams,
+        group.requestBody,
+        response.status
+      ]);
+      const existing = grouped.get(key);
+
+      if (existing) {
+        existing.responses.push(response);
+      } else {
+        grouped.set(key, {
+          method: group.method,
+          path: group.path,
+          pathParams: group.pathParams,
+          queryParams: group.queryParams,
+          requestBody: group.requestBody,
+          responseStatus: response.status,
+          responses: [response]
+        });
+      }
+    }
+  }
+
+  return Array.from(grouped.values());
+}
+
 export function buildScenarios(
   scenarioGroups: Awaited<
     ReturnType<typeof getScenarioGroups>
   >
 ) {
-  const dynamicPathGroups = new Map<
-    string,
-    {
-      method: string;
-      path: string;
-      pathParams: Record<string, string>;
-      queryParams: Record<string, string>;
-      requestBody: unknown;
-      responseStatus: number;
-      responses: ScenarioResponse[];
-    }
-  >();
-
-  for (const group of scenarioGroups) {
-    for (const response of group.responses) {
-      const key = [
-        group.method,
-        group.path,
-        canonicalStringify(
-          group.pathParams
-        ),
-        canonicalStringify(
-          group.queryParams
-        ),
-        canonicalStringify(
-          group.requestBody
-        ),
-        response.status
-      ].join(":");
-
-      const existing =
-        dynamicPathGroups.get(key);
-
-      if (existing) {
-        existing.responses.push(
-          response
-        );
-        continue;
-      }
-
-      dynamicPathGroups.set(key, {
-        method: group.method,
-        path: group.path,
-        pathParams: group.pathParams,
-        queryParams: group.queryParams,
-        requestBody: group.requestBody,
-        responseStatus: response.status,
-        responses: [response]
-      });
-    }
-  }
-
-  return Array.from(
-    dynamicPathGroups.values()
-  ).map((group, index) => {
+  return groupResponses(scenarioGroups).map(
+    (group, index) => {
     const baseline =
       findBestBaselineResponse(
         group.responses
@@ -198,6 +344,11 @@ export function buildScenarios(
       sanitizeObject(
         baseline.body
       );
+
+    assertNoSanitizedResponseFields(
+      baseline.body,
+      sanitizedResponseBody
+    );
 
     const outputScenario: ExportedScenario = {
       id: index + 1,
@@ -226,41 +377,6 @@ export function buildScenarios(
     ) {
       outputScenario.request.queryParams =
         group.queryParams;
-    }
-
-    const detectedDynamicFields =
-      detectDynamicFields(
-        group.responses.map(
-          (response) => response.body
-        )
-      );
-
-    const sanitizedDynamicFields =
-      getSanitizedFields(
-        baseline.body,
-        sanitizedResponseBody
-      );
-
-    const stateDerivedFields =
-      detectedDynamicFields.filter(
-        (field) =>
-          !isStateDerivedField(
-            field,
-            baseline,
-            group.pathParams
-          )
-      );
-
-    const dynamicFields = Array.from(
-      new Set([
-        ...stateDerivedFields,
-        ...sanitizedDynamicFields
-      ])
-    );
-
-    if (dynamicFields.length > 0) {
-      outputScenario.dynamicFields =
-        dynamicFields;
     }
 
     if (baseline.snapshot) {
@@ -321,6 +437,11 @@ export function buildLifecycleScenarios(
           }
         };
 
+        assertNoSanitizedResponseFields(
+          request.responseBody,
+          step.expected.body
+        );
+
         if (
           Object.keys(
             request.pathParams
@@ -339,19 +460,6 @@ export function buildLifecycleScenarios(
             request.queryParams;
         }
 
-        const dynamicFields =
-          getSanitizedFields(
-            request.responseBody,
-            step.expected.body
-          );
-
-        if (
-          dynamicFields.length > 0
-        ) {
-          step.dynamicFields =
-            dynamicFields;
-        }
-
         outputScenario.steps.push(
           step
         );
@@ -367,17 +475,146 @@ export function buildLifecycleScenarios(
   );
 }
 
-async function main() {
+function assertNoSanitizedResponseFields(
+  original: unknown,
+  sanitized: unknown
+) {
+  const pointers = getSanitizedFields(
+    original,
+    sanitized
+  ).sort();
+
+  if (pointers.length > 0) {
+    throw new ScenarioExportError(
+      "SANITIZED_RESPONSE_FIELD_UNSUPPORTED",
+      `ShadowSpec cannot export a response whose required fields were sanitized: ${pointers.join(
+        ", "
+      )}. Configure an explicit redaction policy before replaying this scenario.`
+    );
+  }
+}
+
+function scenarioKey(
+  group: GroupedResponses
+): string {
+  return createHash("sha256")
+    .update(
+      canonicalStringify([
+        group.method,
+        group.path,
+        group.pathParams,
+        group.queryParams,
+        group.requestBody,
+        group.responseStatus
+      ])
+    )
+    .digest("hex");
+}
+
+export function buildCandidateArtifact(
+  scenarioGroups: Awaited<
+    ReturnType<typeof getScenarioGroups>
+  >
+): CandidateArtifact {
+  const candidates = groupResponses(
+    scenarioGroups
+  ).flatMap((group, index) => {
+    const baseline = findBestBaselineResponse(
+      group.responses
+    );
+    const key = scenarioKey(group);
+
+    return detectDynamicCandidates(
+      group.responses.map(
+        (response) => response.body
+      )
+    ).map<CandidateDiagnostic>((candidate) => {
+      const tokens = getJsonPointerTokens(
+        candidate.pointer
+      );
+      const isStateDerived =
+        candidate.reason === "value_changed" &&
+        tokens.length === 1 &&
+        isStateDerivedField(
+          tokens[0],
+          baseline,
+          group.pathParams
+        );
+
+      return {
+        scenarioId: index + 1,
+        scenarioKey: key,
+        method: group.method,
+        path: group.path,
+        ...candidate,
+        reason: isStateDerived
+          ? "correlated_with_snapshot"
+          : candidate.reason
+      };
+    });
+  });
+
+  candidates.sort(
+    (left, right) =>
+      left.scenarioKey < right.scenarioKey
+        ? -1
+        : left.scenarioKey > right.scenarioKey
+          ? 1
+          : left.pointer < right.pointer
+            ? -1
+            : left.pointer > right.pointer
+              ? 1
+              : 0
+  );
+
+  return {
+    version: 1,
+    candidates
+  };
+}
+
+export async function exportScenarios(
+  dependencies: ScenarioExportDependencies = {}
+): Promise<void> {
+  const scenarioPath =
+    dependencies.scenarioPath ??
+    "shadowspec-scenarios.json";
+  const candidatePath =
+    dependencies.candidatePath ??
+    "shadowspec-candidates.json";
+  const fileSystem =
+    dependencies.fileSystem ?? fs;
+  const loadScenarioGroups =
+    dependencies.getScenarioGroups ??
+    getScenarioGroups;
+  const loadCapturedRequests =
+    dependencies.getCapturedRequests ??
+    getCapturedRequests;
+  const log = dependencies.log ?? console.log;
+
+  invalidateArtifact(
+    scenarioPath,
+    fileSystem
+  );
+  invalidateArtifact(
+    candidatePath,
+    fileSystem
+  );
+
   const scenarioGroups =
-    await getScenarioGroups();
+    await loadScenarioGroups();
 
   const legacyScenarios =
     buildScenarios(
       scenarioGroups
     );
+  const candidateArtifact =
+    buildCandidateArtifact(
+      scenarioGroups
+    );
 
   const capturedRequests =
-    await getCapturedRequests();
+    await loadCapturedRequests();
 
   const sequences =
     buildScenarioSequences(
@@ -400,26 +637,34 @@ async function main() {
     ...lifecycleScenarios
   ];
 
+  validateScenarios(
+    output as unknown as ShadowSpecScenario[]
+  );
+
+  writeJsonAtomically(
+    candidatePath,
+    candidateArtifact,
+    fileSystem
+  );
+  writeJsonAtomically(
+    scenarioPath,
+    output,
+    fileSystem
+  );
+
   if (output.length === 0) {
-    console.log("No scenarios found.");
+    log("No scenarios found.");
     return;
   }
 
-  fs.writeFileSync(
-    "shadowspec-scenarios.json",
-    JSON.stringify(
-      output,
-      null,
-      2
-    )
-  );
-
-  console.log(
+  log(
     `Exported ${output.length} ShadowSpec scenario(s).`
   );
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  exportScenarios().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

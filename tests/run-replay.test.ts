@@ -260,6 +260,10 @@ describe("structured lifecycle binding failures", () => {
               path: "/orders",
               body: {}
             },
+            expected: {
+              status: 200,
+              body: { orderId: 100 }
+            },
             capture: {
               orderId: {
                 from: "response.body",
@@ -292,6 +296,10 @@ describe("structured lifecycle binding failures", () => {
       [
         lifecycleScenario([
           step({
+            expected: {
+              status: 200,
+              body: { orderId: 100 }
+            },
             capture: {
               orderId: {
                 from: "response.body",
@@ -868,5 +876,81 @@ describe("structured lifecycle binding failures", () => {
 
     expect(result.error).toBe(unexpectedError);
     expect(result.writes).toHaveLength(0);
+  });
+
+  it.each([
+    ["status"],
+    ["/status"]
+  ])("rejects nonempty legacy dynamicFields before setup or scenario HTTP", async (dynamicFields) => {
+    const scenario = {
+      ...standaloneScenario(),
+      dynamicFields
+    };
+    const result = await execute([scenario]);
+
+    expect(result.error).toMatchObject({
+      code: "UNSAFE_LEGACY_DYNAMIC_FIELD"
+    });
+    expect(result.setupMock).not.toHaveBeenCalled();
+    expect(result.replayMock).not.toHaveBeenCalled();
+    expect(
+      result.targetVerificationMock
+    ).not.toHaveBeenCalled();
+  });
+
+  it("allows empty legacy dynamicFields without masking behavior", async () => {
+    const scenario = {
+      ...standaloneScenario(),
+      dynamicFields: []
+    };
+    const result = await execute(
+      [scenario],
+      [{ status: 200, body: { status: "changed" } }]
+    );
+
+    expect(result.report).toMatchObject({
+      passed: false,
+      failedChecks: 1
+    });
+  });
+
+  it("uses exact explicit ignored-value comparison during replay", async () => {
+    const scenario = {
+      ...standaloneScenario(),
+      expected: {
+        status: 200,
+        body: {
+          requestId: "production",
+          status: "ok"
+        }
+      },
+      comparison: {
+        ignoredValues: [
+          {
+            pointer: "/requestId",
+            type: "string" as const
+          }
+        ]
+      }
+    };
+    const result = await execute(
+      [scenario],
+      [
+        {
+          status: 200,
+          body: {
+            requestId: "replay",
+            status: "ok"
+          }
+        }
+      ]
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.report).toMatchObject({
+      passed: true,
+      passedChecks: 1,
+      failedChecks: 0
+    });
   });
 });
