@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  ConfigError,
+  loadConfig
+} from "./config";
+import {
   detectDependencies
 } from "./init";
 
@@ -18,15 +22,6 @@ type DoctorCheck = {
 type PackageJson = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
-};
-
-type ShadowSpecConfig = {
-  schema?: unknown;
-  tables?: unknown;
-  capture?: unknown;
-  privacy?: {
-    snapshotAllowedColumns?: unknown;
-  };
 };
 
 export type DoctorResult = {
@@ -82,16 +77,14 @@ function loadPackageJson(
   }
 
   try {
-    const parsed =
-      JSON.parse(
-        fs.readFileSync(
-          packagePath,
-          "utf8"
-        )
-      ) as PackageJson;
-
     return {
-      packageJson: parsed
+      packageJson:
+        JSON.parse(
+          fs.readFileSync(
+            packagePath,
+            "utf8"
+          )
+        ) as PackageJson
     };
   } catch {
     return {
@@ -101,73 +94,17 @@ function loadPackageJson(
   }
 }
 
-function loadConfig(
-  cwd: string
-):
-  | {
-      config: ShadowSpecConfig;
-    }
-  | {
-      error: string;
-    } {
-  const configPath =
-    path.join(
-      cwd,
-      "shadowspec.config.json"
-    );
-
-  if (!fs.existsSync(configPath)) {
-    return {
-      error:
-        "shadowspec.config.json was not found."
-    };
-  }
-
-  try {
-    const parsed =
-      JSON.parse(
-        fs.readFileSync(
-          configPath,
-          "utf8"
-        )
-      ) as ShadowSpecConfig;
-
-    return {
-      config: parsed
-    };
-  } catch {
-    return {
-      error:
-        "shadowspec.config.json is not valid JSON."
-    };
-  }
-}
-
 function hasApprovedSnapshotColumns(
-  value: unknown
+  value: Record<
+    string,
+    string[]
+  >
 ): boolean {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value)
-  ) {
-    return false;
-  }
-
   return Object.values(
-    value as Record<
-      string,
-      unknown
-    >
+    value
   ).some(
     (columns) =>
-      Array.isArray(columns) &&
-      columns.length > 0 &&
-      columns.every(
-        (column) =>
-          typeof column === "string" &&
-          column.length > 0
-      )
+      columns.length > 0
   );
 }
 
@@ -270,15 +207,73 @@ export function runDoctor(
     });
   }
 
-  const configResult =
-    loadConfig(cwd);
+  try {
+    const config =
+      loadConfig(cwd);
 
-  if ("error" in configResult) {
+    checks.push({
+      label:
+        "shadowspec.config.json",
+      status: "PASS"
+    });
+
+    checks.push({
+      label: "schema",
+      status: "PASS",
+      detail: config.schema
+    });
+
+    if (
+      config.tables.length === 0
+    ) {
+      checks.push({
+        label: "tables",
+        status: "REVIEW",
+        detail:
+          "No application tables are configured."
+      });
+    } else {
+      checks.push({
+        label: "tables",
+        status: "PASS",
+        detail:
+          `${config.tables.length} configured`
+      });
+    }
+
+    if (
+      hasApprovedSnapshotColumns(
+        config.privacy
+          .snapshotAllowedColumns
+      )
+    ) {
+      checks.push({
+        label:
+          "snapshot privacy",
+        status: "PASS",
+        detail:
+          "Explicit snapshot columns are configured."
+      });
+    } else {
+      checks.push({
+        label:
+          "snapshot privacy",
+        status: "REVIEW",
+        detail:
+          "No snapshot columns are explicitly approved."
+      });
+    }
+  } catch (error) {
+    const detail =
+      error instanceof ConfigError
+        ? `${error.code}: ${error.message}`
+        : "ShadowSpec config could not be loaded.";
+
     checks.push({
       label:
         "shadowspec.config.json",
       status: "FAIL",
-      detail: configResult.error
+      detail
     });
 
     checks.push({
@@ -302,119 +297,6 @@ export function runDoctor(
       detail:
         "Cannot inspect privacy settings without a valid ShadowSpec config."
     });
-  } else {
-    const config =
-      configResult.config;
-
-    checks.push({
-      label:
-        "shadowspec.config.json",
-      status: "PASS"
-    });
-
-    if (
-      typeof config.schema ===
-        "string" &&
-      config.schema.trim().length > 0
-    ) {
-      checks.push({
-        label: "schema",
-        status: "PASS",
-        detail: config.schema
-      });
-    } else {
-      checks.push({
-        label: "schema",
-        status: "FAIL",
-        detail:
-          "A non-empty schema name is required."
-      });
-    }
-
-    if (
-      Array.isArray(
-        config.tables
-      ) &&
-      config.tables.every(
-        (table) =>
-          typeof table ===
-            "string" &&
-          table.trim().length > 0
-      )
-    ) {
-      if (
-        config.tables.length === 0
-      ) {
-        checks.push({
-          label: "tables",
-          status: "REVIEW",
-          detail:
-            "No application tables are configured."
-        });
-      } else {
-        checks.push({
-          label: "tables",
-          status: "PASS",
-          detail:
-            `${config.tables.length} configured`
-        });
-      }
-    } else {
-      checks.push({
-        label: "tables",
-        status: "FAIL",
-        detail:
-          "tables must be an array of non-empty strings."
-      });
-    }
-
-    const snapshotAllowedColumns =
-      config.privacy
-        ?.snapshotAllowedColumns;
-
-    if (
-      snapshotAllowedColumns ===
-        undefined ||
-      (
-        typeof snapshotAllowedColumns ===
-          "object" &&
-        snapshotAllowedColumns !==
-          null &&
-        !Array.isArray(
-          snapshotAllowedColumns
-        )
-      )
-    ) {
-      if (
-        hasApprovedSnapshotColumns(
-          snapshotAllowedColumns
-        )
-      ) {
-        checks.push({
-          label:
-            "snapshot privacy",
-          status: "PASS",
-          detail:
-            "Explicit snapshot columns are configured."
-        });
-      } else {
-        checks.push({
-          label:
-            "snapshot privacy",
-          status: "REVIEW",
-          detail:
-            "No snapshot columns are explicitly approved."
-        });
-      }
-    } else {
-      checks.push({
-        label:
-          "snapshot privacy",
-        status: "FAIL",
-        detail:
-          "privacy.snapshotAllowedColumns must be an object."
-      });
-    }
   }
 
   const passed =
