@@ -5,3 +5,7 @@ shadowspec-results/
 dist/
 node_modules/.kilo/
 .vscode/
+
+node_modules/
+.kilo/
+*.tgz
