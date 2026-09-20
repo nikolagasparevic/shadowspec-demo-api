@@ -1,4 +1,7 @@
 import Fastify from "fastify";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {
   Pool,
   PoolClient
@@ -38,7 +41,7 @@ function createPool(
           query.includes("INSERT INTO api_requests")) ||
         (failures.recorderHang === "commit" && query === "COMMIT")
       ) {
-        return new Promise(() => {});
+        return new Promise(() => { });
       }
       if (
         failures.recorder &&
@@ -99,7 +102,7 @@ function createPool(
   });
   const connect = vi.fn(() =>
     failures.recorderHang === "connect"
-      ? new Promise<PoolClient>(() => {})
+      ? new Promise<PoolClient>(() => { })
       : Promise.resolve(client)
   );
   const end = vi.fn();
@@ -424,12 +427,480 @@ describe("public Fastify integration", () => {
     expect(database.connect).toHaveBeenCalledTimes(2);
   });
 
+  it("loads capture settings from shadowspec.config.json when configFile is enabled", async () => {
+    const originalCwd =
+      process.cwd();
+
+    const cwd =
+      fs.mkdtempSync(
+        path.join(
+          os.tmpdir(),
+          "shadowspec-runtime-config-"
+        )
+      );
+
+    try {
+      fs.writeFileSync(
+        path.join(
+          cwd,
+          "shadowspec.config.json"
+        ),
+        JSON.stringify({
+          schema: "catalog",
+          tables: [
+            "books"
+          ],
+          capture: {
+            enabled: true
+          },
+          privacy: {
+            snapshotAllowedColumns: {
+              books: [
+                "id",
+                "title"
+              ]
+            }
+          }
+        })
+      );
+
+      vi.spyOn(
+        process,
+        "cwd"
+      ).mockReturnValue(cwd);
+
+      const database =
+        createPool([
+          {
+            id: 7,
+            title: "Dune"
+          }
+        ]);
+
+      const app =
+        Fastify();
+
+      registerShadowSpec(
+        app,
+        {
+          applicationPool:
+            database.pool,
+          configFile: true
+        }
+      );
+
+      app.get(
+        "/books/:id",
+        async () => ({
+          ok: true
+        })
+      );
+
+      const response =
+        await app.inject({
+          method: "GET",
+          url: "/books/7"
+        });
+
+      expect(
+        response.statusCode
+      ).toBe(200);
+
+      expect(
+        database.clientQuery.mock.calls.some(
+          ([sql]) =>
+            String(sql).includes(
+              'FROM ONLY "catalog"."books"'
+            )
+        )
+      ).toBe(true);
+
+      expect(
+        database.connect
+      ).toHaveBeenCalledTimes(2);
+
+      await app.close();
+    } finally {
+      vi.restoreAllMocks();
+
+      process.chdir(
+        originalCwd
+      );
+
+      fs.rmSync(
+        cwd,
+        {
+          recursive: true,
+          force: true
+        }
+      );
+    }
+  });
+
+  it("lets explicit runtime options override config file values", async () => {
+    const originalCwd =
+      process.cwd();
+
+    const cwd =
+      fs.mkdtempSync(
+        path.join(
+          os.tmpdir(),
+          "shadowspec-runtime-config-"
+        )
+      );
+
+    try {
+      fs.writeFileSync(
+        path.join(
+          cwd,
+          "shadowspec.config.json"
+        ),
+        JSON.stringify({
+          schema: "ignored",
+          tables: [
+            "orders"
+          ],
+          capture: {
+            enabled: false
+          },
+          privacy: {
+            snapshotAllowedColumns: {
+              orders: [
+                "id",
+                "title"
+              ]
+            }
+          }
+        })
+      );
+
+      vi.spyOn(
+        process,
+        "cwd"
+      ).mockReturnValue(cwd);
+
+      const database =
+        createPool([
+          {
+            id: 7,
+            title: "Dune"
+          }
+        ]);
+
+      const app =
+        Fastify();
+
+      registerShadowSpec(
+        app,
+        {
+          applicationPool:
+            database.pool,
+          configFile: true,
+
+          enabled: true,
+
+          tables: [
+            "books"
+          ],
+
+          schema:
+            "catalog",
+
+          privacy: {
+            snapshotAllowedColumns: {
+              books: [
+                "id",
+                "title"
+              ]
+            }
+          }
+        }
+      );
+
+      app.get(
+        "/books/:id",
+        async () => ({
+          ok: true
+        })
+      );
+
+      const response =
+        await app.inject({
+          method: "GET",
+          url: "/books/7"
+        });
+
+      expect(
+        response.statusCode
+      ).toBe(200);
+
+      expect(
+        database.clientQuery.mock.calls.some(
+          ([sql]) =>
+            String(sql).includes(
+              'FROM ONLY "catalog"."books"'
+            )
+        )
+      ).toBe(true);
+
+      expect(
+        database.clientQuery.mock.calls.some(
+          ([sql]) =>
+            String(sql).includes(
+              '"ignored"."orders"'
+            )
+        )
+      ).toBe(false);
+
+      await app.close();
+    } finally {
+      vi.restoreAllMocks();
+
+      process.chdir(
+        originalCwd
+      );
+
+      fs.rmSync(
+        cwd,
+        {
+          recursive: true,
+          force: true
+        }
+      );
+    }
+  });
+
+  it("lets config file values override environment fallbacks", async () => {
+    process.env.SHADOWSPEC_CAPTURE =
+      "false";
+
+    process.env.SHADOWSPEC_TABLES =
+      "orders";
+
+    process.env.SHADOWSPEC_SCHEMA =
+      "environment_schema";
+
+    const originalCwd =
+      process.cwd();
+
+    const cwd =
+      fs.mkdtempSync(
+        path.join(
+          os.tmpdir(),
+          "shadowspec-runtime-config-"
+        )
+      );
+
+    try {
+      fs.writeFileSync(
+        path.join(
+          cwd,
+          "shadowspec.config.json"
+        ),
+        JSON.stringify({
+          schema: "catalog",
+          tables: [
+            "books"
+          ],
+          capture: {
+            enabled: true
+          },
+          privacy: {
+            snapshotAllowedColumns: {
+              books: [
+                "id",
+                "title"
+              ]
+            }
+          }
+        })
+      );
+
+      vi.spyOn(
+        process,
+        "cwd"
+      ).mockReturnValue(cwd);
+
+      const database =
+        createPool([
+          {
+            id: 7,
+            title: "Dune"
+          }
+        ]);
+
+      const app =
+        Fastify();
+
+      registerShadowSpec(
+        app,
+        {
+          applicationPool:
+            database.pool,
+          configFile: true
+        }
+      );
+
+      app.get(
+        "/books/:id",
+        async () => ({
+          ok: true
+        })
+      );
+
+      const response =
+        await app.inject({
+          method: "GET",
+          url: "/books/7"
+        });
+
+      expect(
+        response.statusCode
+      ).toBe(200);
+
+      expect(
+        database.clientQuery.mock.calls.some(
+          ([sql]) =>
+            String(sql).includes(
+              'FROM ONLY "catalog"."books"'
+            )
+        )
+      ).toBe(true);
+
+      expect(
+        database.clientQuery.mock.calls.some(
+          ([sql]) =>
+            String(sql).includes(
+              "environment_schema"
+            )
+        )
+      ).toBe(false);
+
+      await app.close();
+    } finally {
+      vi.restoreAllMocks();
+
+      process.chdir(
+        originalCwd
+      );
+
+      fs.rmSync(
+        cwd,
+        {
+          recursive: true,
+          force: true
+        }
+      );
+    }
+  });
+
+  it("disables capture safely when configFile is enabled but config is missing", async () => {
+    const originalCwd =
+      process.cwd();
+
+    const cwd =
+      fs.mkdtempSync(
+        path.join(
+          os.tmpdir(),
+          "shadowspec-runtime-config-"
+        )
+      );
+
+    const database =
+      createPool([
+        {
+          id: 7,
+          title: "Dune"
+        }
+      ]);
+
+    const logger =
+      createLogger();
+
+    const app =
+      Fastify({
+        loggerInstance:
+          logger.logger
+      });
+
+    try {
+      vi.spyOn(
+        process,
+        "cwd"
+      ).mockReturnValue(cwd);
+
+      registerShadowSpec(
+        app,
+        {
+          applicationPool:
+            database.pool,
+          configFile: true
+        }
+      );
+
+      app.get(
+        "/books/7",
+        async () => ({
+          ok: true
+        })
+      );
+
+      const response =
+        await app.inject({
+          method: "GET",
+          url: "/books/7"
+        });
+
+      expect(
+        response.statusCode
+      ).toBe(200);
+
+      expect(
+        app.hasRequestDecorator(
+          "shadowSpecSnapshot"
+        )
+      ).toBe(false);
+
+      expect(
+        database.connect
+      ).not.toHaveBeenCalled();
+
+      expect(
+        logger.error
+      ).toHaveBeenCalledWith(
+        {
+          errorName:
+            "ConfigError",
+          errorCode:
+            "CONFIG_NOT_FOUND"
+        },
+        "ShadowSpec capture disabled because its config file could not be loaded."
+      );
+    } finally {
+      await app.close();
+
+      vi.restoreAllMocks();
+
+      process.chdir(
+        originalCwd
+      );
+
+      fs.rmSync(
+        cwd,
+        {
+          recursive: true,
+          force: true
+        }
+      );
+    }
+  });
+
   it("uses the environment snapshot deadline and fails open", async () => {
     vi.useFakeTimers();
     process.env.SHADOWSPEC_CAPTURE = "true";
     process.env.SHADOWSPEC_TABLES = "books";
     process.env.SHADOWSPEC_SNAPSHOT_TIMEOUT_MS = "10";
-    const connect = vi.fn(() => new Promise<PoolClient>(() => {}));
+    const connect = vi.fn(() => new Promise<PoolClient>(() => { }));
     const logger = createLogger();
     const app = Fastify({ loggerInstance: logger.logger });
     let handled = 0;
