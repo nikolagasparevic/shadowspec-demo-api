@@ -115,7 +115,12 @@ suite("capture deadlines with real PostgreSQL", () => {
       tables: ["items"],
       schema,
       snapshotTimeoutMs,
-      recorderTimeoutMs
+      recorderTimeoutMs,
+      privacy: {
+        snapshotAllowedColumns: {
+          items: ["item_key", "value"]
+        }
+      }
     });
     app.post("/items", async (_request, reply) => {
       handled++;
@@ -207,7 +212,13 @@ suite("capture deadlines with real PostgreSQL", () => {
         await expect(captureDatabaseSnapshot(
           applicationPool,
           ["items"],
-          { schema, snapshotTimeoutMs: 500 }
+          {
+            schema,
+            snapshotTimeoutMs: 500,
+            snapshotAllowedColumns: {
+              items: ["item_key", "value"]
+            }
+          }
         )).resolves.toMatchObject({ tables: { items: { rows: [{ item_key: 1 }] } } });
       } finally {
         if (!heldReleased) held.release();
@@ -244,7 +255,13 @@ suite("capture deadlines with real PostgreSQL", () => {
       await expect(captureDatabaseSnapshot(
         applicationPool,
         ["items"],
-        { schema, snapshotTimeoutMs: 500 }
+        {
+          schema,
+          snapshotTimeoutMs: 500,
+          snapshotAllowedColumns: {
+            items: ["item_key", "value"]
+          }
+        }
       )).resolves.toBeDefined();
       await applicationPool.end();
     });

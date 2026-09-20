@@ -10,7 +10,19 @@ const app = Fastify({
 });
 
 registerShadowSpec(app, {
-  applicationPool: pool
+  applicationPool: pool,
+  tables: ["orders"],
+  privacy: {
+    snapshotAllowedColumns: {
+      orders: [
+        "id",
+        "customer_id",
+        "product_id",
+        "quantity",
+        "status"
+      ]
+    }
+  }
 });
 
 registerShadowSpecReplayTarget(app);

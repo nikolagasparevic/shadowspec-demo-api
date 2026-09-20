@@ -7,8 +7,9 @@ import {
 } from "vitest";
 import type { Pool, PoolClient } from "pg";
 import {
-  captureDatabaseSnapshot,
-  SnapshotCaptureError
+  captureDatabaseSnapshot as captureSnapshot,
+  SnapshotCaptureError,
+  type SnapshotCaptureOptions
 } from "../src/db-snapshot";
 
 type TableFixture = {
@@ -17,6 +18,28 @@ type TableFixture = {
   primaryKey: string[];
   rows: Record<string, unknown>[];
 };
+
+const poolFixtures = new WeakMap<Pool, Record<string, TableFixture>>();
+
+function captureDatabaseSnapshot(
+  pool: Pool,
+  tables: readonly string[],
+  options: Partial<SnapshotCaptureOptions> = {}
+) {
+  const fixtures = poolFixtures.get(pool);
+  const snapshotAllowedColumns = options.snapshotAllowedColumns ??
+    Object.fromEntries(tables.map((rawTable) => {
+      const table = rawTable.trim();
+      return [
+        table,
+        fixtures?.[table]?.columns ?? ["book_key", "title"]
+      ];
+    }));
+  return captureSnapshot(pool, tables, {
+    ...options,
+    snapshotAllowedColumns
+  });
+}
 
 function database(
   tables: Record<string, TableFixture>,
@@ -78,6 +101,7 @@ function database(
   const client = { query, release } as unknown as PoolClient;
   const connect = vi.fn(async () => client);
   const pool = { connect } as unknown as Pool;
+  poolFixtures.set(pool, tables);
   return { pool, connect, query, release };
 }
 
@@ -178,6 +202,105 @@ describe("captureDatabaseSnapshot", () => {
     expect(read).toContain('SELECT "book_key", "title"');
     expect(read).not.toContain("SELECT *");
     expect(read).toContain('ORDER BY "book_key" ASC');
+  });
+
+  it("accepts an exact allowlist independent of input order", async () => {
+    const db = database({ books });
+    await expect(captureDatabaseSnapshot(db.pool, ["books"], {
+      snapshotAllowedColumns: {
+        books: ["title", "book_key"]
+      }
+    })).resolves.toEqual({
+      tables: { books: { rows: books.rows } }
+    });
+  });
+
+  it("rejects an unauthorized column before any row-data SELECT", async () => {
+    const db = database({
+      books: {
+        ...books,
+        columns: ["book_key", "title", "secret"],
+        rows: [{ book_key: 7, title: "Dune", secret: "sentinel-secret" }]
+      }
+    });
+
+    await expect(captureDatabaseSnapshot(db.pool, ["books"], {
+      snapshotAllowedColumns: { books: ["book_key", "title"] }
+    })).rejects.toMatchObject({
+      code: "CAPTURE_SNAPSHOT_COLUMN_FORBIDDEN",
+      tableName: "books",
+      columnName: "secret"
+    });
+    expect(db.query.mock.calls.some(([sql]) =>
+      String(sql).startsWith("SELECT ")
+    )).toBe(false);
+    expect(db.query.mock.calls.some(([sql]) =>
+      String(sql).includes("snapshot-primary-key")
+    )).toBe(false);
+    expect(JSON.stringify(db.query.mock.calls)).not.toContain("sentinel-secret");
+  });
+
+  it("rejects an approved column missing from the database", async () => {
+    const db = database({ books });
+    await expect(captureDatabaseSnapshot(db.pool, ["books"], {
+      snapshotAllowedColumns: {
+        books: ["book_key", "title", "missing_column"]
+      }
+    })).rejects.toMatchObject({
+      code: "CAPTURE_SNAPSHOT_COLUMN_FORBIDDEN",
+      columnName: "missing_column"
+    });
+    expect(db.query.mock.calls.some(([sql]) =>
+      String(sql).startsWith("SELECT ")
+    )).toBe(false);
+  });
+
+  it("rejects a primary-key column outside authorization before row read", async () => {
+    const db = database({
+      books: {
+        oid: "41",
+        columns: ["title"],
+        primaryKey: ["book_key"],
+        rows: [{ title: "Dune" }]
+      }
+    });
+    await expect(captureDatabaseSnapshot(db.pool, ["books"], {
+      snapshotAllowedColumns: { books: ["title"] }
+    })).rejects.toMatchObject({
+      code: "CAPTURE_SNAPSHOT_COLUMN_FORBIDDEN",
+      columnName: "book_key"
+    });
+    expect(db.query.mock.calls.some(([sql]) =>
+      String(sql).startsWith("SELECT ")
+    )).toBe(false);
+  });
+
+  it("returns no partial snapshot when a later table violates authorization", async () => {
+    const db = database({
+      authors: { ...books, oid: "42" },
+      books: {
+        ...books,
+        columns: ["book_key", "title", "secret"]
+      }
+    });
+    await expect(captureDatabaseSnapshot(
+      db.pool,
+      ["authors", "books"],
+      {
+        snapshotAllowedColumns: {
+          authors: ["book_key", "title"],
+          books: ["book_key", "title"]
+        }
+      }
+    )).rejects.toMatchObject({
+      code: "CAPTURE_SNAPSHOT_COLUMN_FORBIDDEN",
+      tableName: "books"
+    });
+    expect(db.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(db.query).not.toHaveBeenCalledWith("COMMIT");
+    expect(db.query.mock.calls.some(([sql]) =>
+      String(sql).startsWith("SELECT ") && String(sql).includes('"books"')
+    )).toBe(false);
   });
 
   it("preserves composite primary-key declaration order", async () => {

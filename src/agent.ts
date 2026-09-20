@@ -12,6 +12,13 @@ import {
   captureDatabaseSnapshot
 } from "./db-snapshot";
 import { REPLAY_TARGET_ENDPOINT } from "./replay-target-protocol";
+import {
+  assertRequestPrivacy,
+  assertResponsePrivacy,
+  CapturePrivacyError,
+  compileCapturePrivacyPolicy,
+  type CapturePrivacyOptions
+} from "./capture-privacy";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -31,6 +38,7 @@ export type ShadowSpecOptions = {
   snapshotStatementTimeoutMs?: number;
   snapshotTimeoutMs?: number;
   recorderTimeoutMs?: number;
+  privacy?: CapturePrivacyOptions;
 };
 
 function getConfiguredTables(): string[] {
@@ -79,6 +87,30 @@ function getCaptureErrorDetails(
   };
 }
 
+function getPrivacyErrorDetails(
+  error: CapturePrivacyError
+) {
+  return {
+    errorName: error.name,
+    errorCode: error.code,
+    ...(error.location === undefined
+      ? {}
+      : { errorLocation: error.location }),
+    ...(error.pointer === undefined
+      ? {}
+      : { errorPointer: error.pointer.slice(0, 256) }),
+    ...(error.headerName === undefined
+      ? {}
+      : { errorHeader: error.headerName }),
+    ...(error.tableName === undefined
+      ? {}
+      : { errorTable: error.tableName }),
+    ...(error.columnName === undefined
+      ? {}
+      : { errorColumn: error.columnName })
+  };
+}
+
 export function registerShadowSpec(
   app: FastifyInstance,
   options: ShadowSpecOptions
@@ -90,15 +122,32 @@ export function registerShadowSpec(
   if (!enabled) {
     return;
   }
+  const tables = [
+    ...(options.tables ??
+      getConfiguredTables())
+  ];
+
+  let privacyPolicy;
+  try {
+    privacyPolicy = compileCapturePrivacyPolicy(options.privacy, tables);
+  } catch (error) {
+    const failure = error instanceof CapturePrivacyError
+      ? error
+      : new CapturePrivacyError(
+          "CAPTURE_PRIVACY_CONFIGURATION_INVALID",
+          "ShadowSpec privacy configuration is invalid."
+        );
+    app.log.error(
+      getPrivacyErrorDetails(failure),
+      "ShadowSpec capture disabled because its privacy configuration is invalid."
+    );
+    return;
+  }
 
   const applicationPool =
     options.applicationPool;
   const capturePool =
     options.capturePool ?? applicationPool;
-  const tables = [
-    ...(options.tables ??
-      getConfiguredTables())
-  ];
   const schema =
     options.schema ??
     process.env.SHADOWSPEC_SCHEMA ??
@@ -145,6 +194,23 @@ export function registerShadowSpec(
         return;
       }
 
+      try {
+        assertRequestPrivacy(privacyPolicy, {
+          headers: request.headers,
+          body: request.body,
+          query: request.query,
+          pathParams: request.params
+        });
+      } catch (error) {
+        if (!(error instanceof CapturePrivacyError)) throw error;
+        request.shadowSpecSnapshot = undefined;
+        request.log.error(
+          getPrivacyErrorDetails(error),
+          "ShadowSpec request capture rejected by its privacy policy."
+        );
+        return;
+      }
+
       const sessionId =
         request.headers[
           "x-shadowspec-session-id"
@@ -164,14 +230,18 @@ export function registerShadowSpec(
               schema,
               statementTimeoutMs:
                 snapshotStatementTimeoutMs,
-              snapshotTimeoutMs
+              snapshotTimeoutMs,
+              snapshotAllowedColumns:
+                privacyPolicy.snapshotAllowedColumns
             }
           );
       } catch (error) {
         request.shadowSpecSnapshot =
           undefined;
         request.log.error(
-          getCaptureErrorDetails(error),
+          error instanceof CapturePrivacyError
+            ? getPrivacyErrorDetails(error)
+            : getCaptureErrorDetails(error),
           "ShadowSpec snapshot capture failed; request will not be recorded."
         );
       }
@@ -202,6 +272,17 @@ export function registerShadowSpec(
         request.shadowSpecSnapshot ===
         undefined
       ) {
+        return payload;
+      }
+
+      try {
+        assertResponsePrivacy(privacyPolicy, responseBody);
+      } catch (error) {
+        if (!(error instanceof CapturePrivacyError)) throw error;
+        request.log.error(
+          getPrivacyErrorDetails(error),
+          "ShadowSpec response capture rejected by its privacy policy."
+        );
         return payload;
       }
 

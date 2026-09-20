@@ -115,11 +115,25 @@ suite("database snapshots with real PostgreSQL", () => {
     schema: string,
     tables: string[],
     pool: Pool = databasePool,
-    statementTimeoutMs?: number
+    statementTimeoutMs?: number,
+    snapshotAllowedColumns?: Record<string, readonly string[]>
   ): Promise<DatabaseSnapshot> {
+    const allowed = snapshotAllowedColumns ?? Object.fromEntries(
+      await Promise.all(tables.map(async (table) => {
+        const result = await databasePool.query<{ column_name: string }>(
+          `SELECT column_name
+           FROM information_schema.columns
+           WHERE table_schema = $1 AND table_name = $2
+           ORDER BY column_name`,
+          [schema, table]
+        );
+        return [table, result.rows.map(({ column_name }) => column_name)];
+      }))
+    );
     return captureDatabaseSnapshot(pool, tables, {
       schema,
-      statementTimeoutMs
+      statementTimeoutMs,
+      snapshotAllowedColumns: allowed
     });
   }
 
@@ -393,7 +407,10 @@ suite("database snapshots with real PostgreSQL", () => {
             enabled: true,
             tables: ["items"],
             schema,
-            snapshotStatementTimeoutMs: 100
+            snapshotStatementTimeoutMs: 100,
+            privacy: {
+              snapshotAllowedColumns: { items: ["key", "value"] }
+            }
           });
           app.get("/healthy", async () => ({ ok: true }));
           try {

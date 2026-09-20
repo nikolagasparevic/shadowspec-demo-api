@@ -1,5 +1,11 @@
 import type { Pool, PoolClient } from "pg";
 import { CaptureDeadline } from "./capture-deadline";
+import {
+  assertSnapshotColumnsAllowed,
+  assertSnapshotPrimaryKeyAllowed,
+  CapturePrivacyError,
+  type SnapshotColumnPolicy
+} from "./capture-privacy";
 
 export type DatabaseSnapshot = {
   tables: Record<
@@ -41,6 +47,7 @@ export type SnapshotCaptureOptions = {
   schema?: string;
   statementTimeoutMs?: number;
   snapshotTimeoutMs?: number;
+  snapshotAllowedColumns: SnapshotColumnPolicy;
 };
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -113,8 +120,11 @@ function asString(value: unknown): string | undefined {
 function classifySnapshotError(
   error: unknown,
   stage?: SnapshotCaptureStage
-): SnapshotCaptureError {
-  if (error instanceof SnapshotCaptureError) return error;
+): SnapshotCaptureError | CapturePrivacyError {
+  if (
+    error instanceof SnapshotCaptureError ||
+    error instanceof CapturePrivacyError
+  ) return error;
   if (
     error !== null &&
     typeof error === "object" &&
@@ -209,7 +219,8 @@ async function describeTable(
   oid: string,
   schema: string,
   table: string,
-  deadline: SnapshotDeadline
+  deadline: SnapshotDeadline,
+  snapshotAllowedColumns: SnapshotColumnPolicy
 ): Promise<{ columns: string[]; primaryKey: string[] }> {
   const columnsResult = await deadline.run(
     () => client.query<ColumnRow>(
@@ -233,6 +244,11 @@ async function describeTable(
       `ShadowSpec cannot snapshot configured table ${schema}.${table}.`
     );
   }
+  const approvedColumns = assertSnapshotColumnsAllowed(
+    snapshotAllowedColumns,
+    table,
+    columns as string[]
+  );
 
   const primaryKeyResult = await deadline.run(
     () => client.query<PrimaryKeyRow>(
@@ -253,6 +269,11 @@ async function describeTable(
     "snapshot-read"
   );
   const primaryKey = primaryKeyResult.rows.map(({ attname }) => asString(attname));
+  assertSnapshotPrimaryKeyAllowed(
+    table,
+    primaryKey.filter((column): column is string => column !== undefined),
+    approvedColumns
+  );
   if (
     primaryKey.length === 0 ||
     primaryKey.some((column) =>
@@ -274,7 +295,7 @@ async function describeTable(
 export async function captureDatabaseSnapshot(
   applicationPool: Pool,
   tables: readonly string[],
-  options: SnapshotCaptureOptions = {}
+  options: SnapshotCaptureOptions
 ): Promise<DatabaseSnapshot> {
   const schema = normalizeIdentifier(options.schema ?? "public", "schema");
   const normalizedTables = normalizeTables(tables);
@@ -349,7 +370,8 @@ export async function captureDatabaseSnapshot(
         originalOid,
         schema,
         table,
-        deadline
+        deadline,
+        options.snapshotAllowedColumns
       );
       await setStatementTimeout(client, deadline, statementTimeoutMs, stage);
       const result = await deadline.run(

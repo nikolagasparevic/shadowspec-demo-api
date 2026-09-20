@@ -19,6 +19,8 @@ import {
   type ShadowSpecOptions
 } from "../src/index";
 
+const snapshotColumns = new WeakMap<object, string[]>();
+
 function createPool(
   snapshotRows: Record<string, unknown>[] = [],
   failures: {
@@ -27,6 +29,7 @@ function createPool(
     recorderHang?: "connect" | "begin" | "insert" | "commit";
   } = {}
 ) {
+  const columns = Object.keys(snapshotRows[0] ?? { id: 1 }).sort();
   const clientQuery = vi.fn(
     async (query: string, parameters?: unknown[]) => {
       if (
@@ -62,8 +65,6 @@ function createPool(
         };
       }
 
-      const columns = Object.keys(snapshotRows[0] ?? { id: 1 })
-        .sort();
       if (query.includes("shadowspec:snapshot-columns")) {
         return {
           rows: columns.map((attname) => ({ attname }))
@@ -107,6 +108,7 @@ function createPool(
     connect,
     end
   } as unknown as Pool;
+  snapshotColumns.set(pool, columns);
 
   return {
     pool,
@@ -143,6 +145,9 @@ async function injectMutation(
   content?: {
     requestBody?: unknown;
     responseBody?: unknown;
+    responseHeaders?: Record<string, string>;
+    requestHeaders?: Record<string, string>;
+    privacy?: ShadowSpecOptions["privacy"];
   }
 ) {
   const app = Fastify({
@@ -156,7 +161,13 @@ async function injectMutation(
     applicationPool: application.pool,
     capturePool: capture.pool,
     enabled: true,
-    tables: ["books"]
+    tables: ["books"],
+    privacy: {
+      snapshotAllowedColumns: {
+        books: snapshotColumns.get(application.pool) ?? ["id"]
+      },
+      ...content?.privacy
+    }
   });
 
   app.route({
@@ -164,6 +175,12 @@ async function injectMutation(
     url: "/books/7",
     handler: async (_request, reply) => {
       mutations++;
+
+      for (const [name, value] of Object.entries(
+        content?.responseHeaders ?? {}
+      )) {
+        reply.header(name, value);
+      }
 
       return reply.code(
         method === "POST" ? 201 : 200
@@ -182,7 +199,10 @@ async function injectMutation(
       url: "/books/7",
       ...(content?.requestBody === undefined
         ? {}
-        : { payload: content.requestBody })
+        : { payload: content.requestBody }),
+      ...(content?.requestHeaders === undefined
+        ? {}
+        : { headers: content.requestHeaders })
     });
 
     return { response, mutations };
@@ -196,7 +216,21 @@ async function injectCapturedRequest(
 ) {
   const app = Fastify();
 
-  registerShadowSpec(app, options);
+  const tables = options.tables ?? (
+    process.env.SHADOWSPEC_TABLES ?? ""
+  ).split(",").map((table) => table.trim()).filter(Boolean);
+  registerShadowSpec(app, {
+    ...options,
+    privacy: {
+      snapshotAllowedColumns: Object.fromEntries(
+        tables.map((table) => [
+          table,
+          snapshotColumns.get(options.applicationPool) ?? ["id"]
+        ])
+      ),
+      ...options.privacy
+    }
+  });
 
   app.get(
     "/books/:id",
@@ -274,7 +308,10 @@ describe("public Fastify integration", () => {
     registerShadowSpec(app, {
       applicationPool: database.pool,
       enabled: true,
-      tables: ["books"]
+      tables: ["books"],
+      privacy: {
+        snapshotAllowedColumns: { books: ["id"] }
+      }
     });
     registerShadowSpecReplayTarget(app, {
       enabled: true,
@@ -398,7 +435,10 @@ describe("public Fastify integration", () => {
     let handled = 0;
 
     registerShadowSpec(app, {
-      applicationPool: { connect } as unknown as Pool
+      applicationPool: { connect } as unknown as Pool,
+      privacy: {
+        snapshotAllowedColumns: { books: ["id"] }
+      }
     });
     app.post("/books", async (_request, reply) => {
       handled++;
@@ -440,6 +480,11 @@ describe("public Fastify integration", () => {
     expect(database.connect).toHaveBeenCalledTimes(2);
     expect(database.clientQuery).toHaveBeenCalledWith("BEGIN");
     expect(database.clientQuery).toHaveBeenCalledWith("COMMIT");
+    const recordedRequest = database.clientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO api_requests")
+    );
+    expect(recordedRequest?.[1]?.[1]).toBe("/books/7");
+    expect(recordedRequest?.[1]?.[2]).toBe(JSON.stringify({ id: "7" }));
     expect(database.release).toHaveBeenCalledTimes(2);
     expect(database.end).not.toHaveBeenCalled();
   });
@@ -644,5 +689,218 @@ describe("public Fastify integration", () => {
     expect(logged).not.toContain(
       "recorder-error-secret"
     );
+  });
+
+  it.each([
+    "Authorization",
+    "aUtHoRiZaTiOn",
+    "Cookie"
+  ])("rejects the %s credential header before snapshot capture", async (name) => {
+    const application = createPool([{ id: 7 }]);
+    const capture = createPool();
+    const logger = createLogger();
+    const secret = "header-value-must-not-be-logged";
+
+    const { response, mutations } = await injectMutation(
+      "POST",
+      application,
+      capture,
+      logger.logger,
+      { requestHeaders: { [name]: secret } }
+    );
+
+    expect(mutations).toBe(1);
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ ok: true, method: "POST" });
+    expect(application.connect).not.toHaveBeenCalled();
+    expect(capture.connect).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: "CAPTURE_SECRET_REPLAY_REQUIRED",
+        errorLocation: "header",
+        errorHeader: name.toLowerCase()
+      }),
+      "ShadowSpec request capture rejected by its privacy policy."
+    );
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(secret);
+  });
+
+  it("rejects a configured header without logging its value", async () => {
+    const application = createPool([{ id: 7 }]);
+    const capture = createPool();
+    const logger = createLogger();
+    const secret = "configured-header-secret";
+
+    await injectMutation("POST", application, capture, logger.logger, {
+      requestHeaders: { "x-api-key": secret },
+      privacy: { forbiddenHeaders: ["X-API-Key"] }
+    });
+
+    expect(application.connect).not.toHaveBeenCalled();
+    expect(capture.connect).not.toHaveBeenCalled();
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(secret);
+  });
+
+  it("rejects an exact request pointer before snapshot and preserves the mutation", async () => {
+    const application = createPool([{ id: 7 }]);
+    const capture = createPool();
+
+    const { response, mutations } = await injectMutation(
+      "PATCH",
+      application,
+      capture,
+      undefined,
+      {
+        requestBody: { credentials: { password: "private" } },
+        privacy: {
+          forbiddenRequestPointers: ["/body/credentials/password"]
+        }
+      }
+    );
+
+    expect(mutations).toBe(1);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, method: "PATCH" });
+    expect(application.connect).not.toHaveBeenCalled();
+    expect(capture.connect).not.toHaveBeenCalled();
+  });
+
+  it("rejects an exact response pointer before recording and preserves the response", async () => {
+    const application = createPool([{ id: 7 }]);
+    const capture = createPool();
+    const logger = createLogger();
+    const secret = "response-value-must-not-be-logged";
+
+    const { response, mutations } = await injectMutation(
+      "POST",
+      application,
+      capture,
+      logger.logger,
+      {
+        responseBody: { data: { token: secret }, ok: true },
+        responseHeaders: { "x-application-result": "unchanged" },
+        privacy: {
+          forbiddenResponsePointers: ["/body/data/token"]
+        }
+      }
+    );
+
+    expect(mutations).toBe(1);
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({
+      data: { token: secret },
+      ok: true
+    });
+    expect(response.headers["x-application-result"]).toBe("unchanged");
+    expect(application.connect).toHaveBeenCalledTimes(1);
+    expect(capture.connect).not.toHaveBeenCalled();
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(secret);
+  });
+
+  it("disables capture safely and logs once for malformed privacy configuration", async () => {
+    const database = createPool([{ id: 7 }]);
+    const logger = createLogger();
+    const app = Fastify({ loggerInstance: logger.logger });
+
+    registerShadowSpec(app, {
+      applicationPool: database.pool,
+      enabled: true,
+      tables: ["books"],
+      privacy: {
+        snapshotAllowedColumns: { books: ["id"] },
+        forbiddenRequestPointers: ["/body/bad~escape"]
+      }
+    });
+    app.post("/books", async (_request, reply) =>
+      reply.code(201).send({ ok: true })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/books",
+      payload: { value: "raw-material" }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ ok: true });
+    expect(database.connect).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      {
+        errorName: "CapturePrivacyError",
+        errorCode: "CAPTURE_PRIVACY_CONFIGURATION_INVALID"
+      },
+      "ShadowSpec capture disabled because its privacy configuration is invalid."
+    );
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain("raw-material");
+    await app.close();
+  });
+
+  it("captures normally with only a ShadowSpec correlation header", async () => {
+    const application = createPool([{ id: 7 }]);
+    const capture = createPool();
+
+    const { response } = await injectMutation(
+      "POST",
+      application,
+      capture,
+      undefined,
+      {
+        requestHeaders: {
+          "x-shadowspec-session-id": "dedicated-capture-session"
+        }
+      }
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(application.connect).toHaveBeenCalledTimes(1);
+    expect(capture.connect).toHaveBeenCalledTimes(1);
+    const insert = capture.clientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO api_requests")
+    );
+    expect(insert?.[1]?.[7]).toBe("dedicated-capture-session");
+  });
+
+  it("fails open without recording or logging row values on snapshot authorization failure", async () => {
+    const sentinel = "snapshot-value-must-not-be-read-or-logged";
+    const application = createPool([{
+      id: 7,
+      title: "Dune",
+      unauthorized: sentinel
+    }]);
+    const capture = createPool();
+    const logger = createLogger();
+
+    const { response, mutations } = await injectMutation(
+      "POST",
+      application,
+      capture,
+      logger.logger,
+      {
+        privacy: {
+          snapshotAllowedColumns: {
+            books: ["id", "title"]
+          }
+        }
+      }
+    );
+
+    expect(mutations).toBe(1);
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ ok: true, method: "POST" });
+    expect(application.clientQuery.mock.calls.some(([sql]) =>
+      String(sql).startsWith("SELECT ")
+    )).toBe(false);
+    expect(capture.connect).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      {
+        errorName: "CapturePrivacyError",
+        errorCode: "CAPTURE_SNAPSHOT_COLUMN_FORBIDDEN",
+        errorTable: "books",
+        errorColumn: "unauthorized"
+      },
+      "ShadowSpec snapshot capture failed; request will not be recorded."
+    );
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(sentinel);
   });
 });
