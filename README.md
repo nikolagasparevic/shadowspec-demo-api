@@ -498,5 +498,11 @@ npm test
 
 Real PostgreSQL integration tests can be enabled with:
 
-```powershe
+```powershell
+$env:SHADOWSPEC_REAL_PG="true"
+npm test
+```
+License
+```
+MIT
 ```
