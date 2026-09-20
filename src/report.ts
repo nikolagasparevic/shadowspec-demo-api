@@ -1,12 +1,22 @@
+import type {
+  BindingFailureCode
+} from "./lifecycle-bindings";
+
 export type ShadowSpecReport = {
   passed: boolean;
   scenarios: number;
-  passedScenarios: number;
-  failedScenarios: number;
+  checks: number;
+  passedChecks: number;
+  failedChecks: number;
   failures: {
     scenario: number;
+    step?: number;
     method: string;
     path: string;
+    queryParams: Record<string, string>;
+    kind?: "binding";
+    code?: BindingFailureCode;
+    message?: string;
     differences: {
       field: string;
       expected: any;
@@ -17,15 +27,17 @@ export type ShadowSpecReport = {
 
 export function createReport(
   scenarios: number,
-  passedScenarios: number,
-  failedScenarios: number,
+  checks: number,
+  passedChecks: number,
+  failedChecks: number,
   failures: ShadowSpecReport["failures"]
 ): ShadowSpecReport {
   return {
-    passed: failedScenarios === 0,
+    passed: failedChecks === 0,
     scenarios,
-    passedScenarios,
-    failedScenarios,
+    checks,
+    passedChecks,
+    failedChecks,
     failures
   };
 }

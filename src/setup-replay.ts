@@ -1,60 +1,108 @@
 import { pool } from "./db";
+import {
+  parseReplaySafetyConfig,
+  runReplayTransaction,
+  type ReplayPool
+} from "./replay-safety";
+import {
+  buildTruncateStatement,
+  inspectReplayCapabilities,
+  lockReplayRelations,
+  parseReplayScope,
+  quoteIdentifier
+} from "./replay-capabilities";
 
-export type ReplaySetup = {
-  orders?: {
-    id?: number;
-    customerId: number;
-    productId: number;
-    quantity: number;
-    status: string;
-  }[];
+export type ReplayRow = Record<string, unknown>;
+
+export type ReplayTable = {
+  rows: ReplayRow[];
 };
 
-export async function resetReplayDatabase() {
-  await pool.query(
-    "TRUNCATE TABLE orders RESTART IDENTITY"
-  );
-}
+export type ReplaySetup = {
+  tables?: Record<
+    string,
+    ReplayTable
+  >;
+};
 
 export async function applyReplaySetup(
-  setup?: ReplaySetup
+  setup?: ReplaySetup,
+  replayPool: ReplayPool = pool,
+  environment: NodeJS.ProcessEnv = process.env
 ) {
-  await resetReplayDatabase();
+  const config = parseReplaySafetyConfig(environment);
+  const scope = parseReplayScope(environment);
 
-  if (!setup) {
-    return;
-  }
-
-  if (setup.orders) {
-    for (const order of setup.orders) {
-      if (order.id !== undefined) {
-        await pool.query(
-          `INSERT INTO orders
-            (id, customer_id, product_id, quantity, status)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [
-            order.id,
-            order.customerId,
-            order.productId,
-            order.quantity,
-            order.status
-          ]
+  await runReplayTransaction(
+    replayPool,
+    config,
+    false,
+    async (client) => {
+      await lockReplayRelations(client, scope);
+      const capabilities =
+        await inspectReplayCapabilities(
+          client,
+          scope,
+          setup
         );
 
-        continue;
+      await client.query(
+        buildTruncateStatement(
+          capabilities.relations
+        )
+      );
+
+      if (!setup?.tables) {
+        return;
       }
 
-      await pool.query(
-        `INSERT INTO orders
-          (customer_id, product_id, quantity, status)
-         VALUES ($1, $2, $3, $4)`,
-        [
-          order.customerId,
-          order.productId,
-          order.quantity,
-          order.status
-        ]
-      );
+      for (const relation of capabilities.restoreOrder) {
+        const table = setup.tables[relation.name];
+
+        if (!table) {
+          continue;
+        }
+
+        for (const row of table.rows) {
+          const columns = relation.columns.map(
+            (column) => column.name
+          );
+
+          const values = columns.map(
+            (column) => row[column]
+          );
+
+          const placeholders = columns.map(
+            (_, index) => `$${index + 1}`
+          );
+
+          await client.query(
+            `INSERT INTO ${quoteIdentifier(relation.schema)}.${quoteIdentifier(relation.name)}
+          (${columns.map(
+            (column) => quoteIdentifier(column)
+          ).join(", ")})
+         VALUES (${placeholders.join(", ")})`,
+            values
+          );
+        }
+
+        for (const sequence of relation.sequences) {
+          const maximum = await client.query<{
+            max_value: string | number | null;
+          }>(
+            `SELECT MAX(${quoteIdentifier(sequence.columnName)}) AS max_value
+             FROM ONLY ${quoteIdentifier(relation.schema)}.${quoteIdentifier(relation.name)}`
+          );
+          const maxValue = maximum.rows[0]?.max_value;
+
+          if (maxValue !== null && maxValue !== undefined) {
+            await client.query(
+              "SELECT pg_catalog.setval($1::oid::regclass, $2, true)",
+              [sequence.oid, maxValue]
+            );
+          }
+        }
+      }
     }
-  }
+  );
 }

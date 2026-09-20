@@ -1,0 +1,21 @@
+-- Apply replay-target-schema.sql first, then supply these psql variables:
+--   project_id, replay_database_id, database_name, token_sha256
+-- token_sha256 must be SHA-256 of a high-entropy token containing at least
+-- 32 bytes. Store the raw token only in the replay runner's secret store.
+
+INSERT INTO shadowspec_internal.replay_target (
+  singleton_id,
+  marker_version,
+  project_id,
+  replay_database_id,
+  database_name,
+  token_sha256
+)
+VALUES (
+  1,
+  1,
+  :'project_id'::uuid,
+  :'replay_database_id'::uuid,
+  :'database_name',
+  :'token_sha256'
+);

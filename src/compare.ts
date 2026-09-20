@@ -1,108 +1,199 @@
-function sortObjectKeys(obj: any): any {
-  if (Array.isArray(obj)) {
-    return obj.map(sortObjectKeys);
-  }
+import type {
+  IgnoredValueDefinition
+} from "./load-scenarios";
+import { escapeJsonPointerToken } from "./json-pointer";
+import { validateIgnoredValues } from "./scenario-validation";
 
-  if (obj !== null && typeof obj === "object") {
-    return Object.keys(obj)
-      .sort()
-      .reduce((sorted, key) => {
-        sorted[key] = sortObjectKeys(obj[key]);
-        return sorted;
-      }, {} as any);
-  }
-
-  return obj;
-}
-
-function removeDynamicFields(
-  value: any,
-  dynamicFields: string[]
-): any {
+function sortObjectKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      removeDynamicFields(item, dynamicFields)
-    );
+    return value.map(sortObjectKeys);
   }
 
-  if (value !== null && typeof value === "object") {
-    const result: any = {};
-
-    for (const [key, childValue] of Object.entries(value)) {
-      if (dynamicFields.includes(key)) {
-        continue;
-      }
-
-      result[key] = removeDynamicFields(
-        childValue,
-        dynamicFields
+  if (
+    value !== null &&
+    typeof value === "object"
+  ) {
+    return Object.keys(value)
+      .sort()
+      .reduce<Record<string, unknown>>(
+        (sorted, key) => {
+          sorted[key] = sortObjectKeys(
+            (value as Record<string, unknown>)[key]
+          );
+          return sorted;
+        },
+        {}
       );
-    }
-
-    return result;
   }
 
   return value;
 }
 
 export function normalizeResponse(
-  body: any,
-  dynamicFields: string[] = []
+  body: unknown
 ) {
-  const withoutDynamicFields = removeDynamicFields(
-    body,
-    dynamicFields
-  );
+  return sortObjectKeys(body);
+}
 
-  return sortObjectKeys(withoutDynamicFields);
+function childPointer(
+  pointer: string,
+  token: string
+): string {
+  return `${pointer}/${escapeJsonPointerToken(token)}`;
+}
+
+function valuesMatch(
+  expected: unknown,
+  actual: unknown,
+  pointer: string,
+  ignoredValues: ReadonlyMap<
+    string,
+    IgnoredValueDefinition
+  >,
+  capturePointers: ReadonlySet<string>
+): boolean {
+  if (capturePointers.has(pointer)) {
+    return true;
+  }
+
+  const ignored = ignoredValues.get(pointer);
+
+  if (ignored) {
+    const typesMatch = (
+      expected !== null &&
+      actual !== null &&
+      typeof expected === ignored.type &&
+      typeof actual === ignored.type
+    );
+
+    return (
+      typesMatch &&
+      (ignored.type !== "number" ||
+        (Number.isFinite(expected) &&
+          Number.isFinite(actual)))
+    );
+  }
+
+  if (Object.is(expected, actual)) {
+    return true;
+  }
+
+  if (
+    Array.isArray(expected) ||
+    Array.isArray(actual)
+  ) {
+    if (
+      !Array.isArray(expected) ||
+      !Array.isArray(actual) ||
+      expected.length !== actual.length
+    ) {
+      return false;
+    }
+
+    return expected.every((value, index) =>
+      valuesMatch(
+        value,
+        actual[index],
+        childPointer(pointer, String(index)),
+        ignoredValues,
+        capturePointers
+      )
+    );
+  }
+
+  if (
+    expected === null ||
+    actual === null ||
+    typeof expected !== "object" ||
+    typeof actual !== "object"
+  ) {
+    return false;
+  }
+
+  const expectedRecord =
+    expected as Record<string, unknown>;
+  const actualRecord =
+    actual as Record<string, unknown>;
+  const expectedKeys = Object.keys(expectedRecord)
+    .sort();
+  const actualKeys = Object.keys(actualRecord)
+    .sort();
+
+  if (
+    expectedKeys.length !== actualKeys.length ||
+    expectedKeys.some(
+      (key, index) => key !== actualKeys[index]
+    )
+  ) {
+    return false;
+  }
+
+  return expectedKeys.every((key) =>
+    valuesMatch(
+      expectedRecord[key],
+      actualRecord[key],
+      childPointer(pointer, key),
+      ignoredValues,
+      capturePointers
+    )
+  );
 }
 
 export function compareResponses(
-  original: any,
-  replay: any,
-  originalStatus: number,
-  replayStatus: number,
-  dynamicFields: string[] = []
+  expected: unknown,
+  actual: unknown,
+  expectedStatus: number,
+  actualStatus: number,
+  ignoredValues: IgnoredValueDefinition[] = [],
+  capturePointers: string[] = []
 ) {
-  const normalizedOriginal = normalizeResponse(
-    original,
-    dynamicFields
-  );
+  validateIgnoredValues(expected, ignoredValues);
 
-  const normalizedReplay = normalizeResponse(
-    replay,
-    dynamicFields
+  const normalizedExpected =
+    normalizeResponse(expected);
+  const normalizedActual =
+    normalizeResponse(actual);
+  const ignoredByPointer = new Map(
+    ignoredValues.map((definition) => [
+      definition.pointer,
+      definition
+    ])
   );
-
+  const captures = new Set(capturePointers);
   const differences: {
     field: string;
-    expected: any;
-    actual: any;
+    expected: unknown;
+    actual: unknown;
   }[] = [];
 
   if (
-    JSON.stringify(normalizedOriginal) !==
-    JSON.stringify(normalizedReplay)
+    !valuesMatch(
+      expected,
+      actual,
+      "",
+      ignoredByPointer,
+      captures
+    )
   ) {
     differences.push({
       field: "body",
-      expected: normalizedOriginal,
-      actual: normalizedReplay
+      expected: normalizedExpected,
+      actual: normalizedActual
     });
   }
 
-  if (originalStatus !== replayStatus) {
+  if (expectedStatus !== actualStatus) {
     differences.push({
       field: "httpStatus",
-      expected: originalStatus,
-      actual: replayStatus
+      expected: expectedStatus,
+      actual: actualStatus
     });
   }
 
   return {
     passed: differences.length === 0,
     differences,
-    original: normalizedOriginal,
-    replay: normalizedReplay
+    original: normalizedExpected,
+    replay: normalizedActual
   };
 }
