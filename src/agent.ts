@@ -11,7 +11,14 @@ import {
 import {
   captureDatabaseSnapshot
 } from "./db-snapshot";
-import { REPLAY_TARGET_ENDPOINT } from "./replay-target-protocol";
+import {
+  REPLAY_TARGET_ENDPOINT
+} from "./replay-target-protocol";
+import {
+  ConfigError,
+  loadConfig,
+  type ShadowSpecConfig
+} from "./config";
 import {
   assertRequestPrivacy,
   assertResponsePrivacy,
@@ -32,22 +39,74 @@ declare module "fastify" {
 export type ShadowSpecOptions = {
   applicationPool: Pool;
   capturePool?: Pool;
+
+  /**
+   * Load shadowspec.config.json from process.cwd().
+   *
+   * Explicit runtime options always take precedence
+   * over values loaded from the config file.
+   */
+  configFile?: boolean;
+
   tables?: readonly string[];
   enabled?: boolean;
   schema?: string;
+
   snapshotStatementTimeoutMs?: number;
   snapshotTimeoutMs?: number;
   recorderTimeoutMs?: number;
+
   privacy?: CapturePrivacyOptions;
 };
 
 function getConfiguredTables(): string[] {
   return (
-    process.env.SHADOWSPEC_TABLES ?? ""
+    process.env.SHADOWSPEC_TABLES ??
+    ""
   )
     .split(",")
-    .map((table) => table.trim())
+    .map(
+      (table) =>
+        table.trim()
+    )
     .filter(Boolean);
+}
+
+function loadRuntimeConfig(
+  app: FastifyInstance,
+  enabled: boolean
+): ShadowSpecConfig | undefined {
+  if (!enabled) {
+    return undefined;
+  }
+
+  try {
+    return loadConfig(
+      process.cwd()
+    );
+  } catch (error) {
+    const detail =
+      error instanceof ConfigError
+        ? {
+            errorName:
+              error.name,
+            errorCode:
+              error.code
+          }
+        : {
+            errorName:
+              error instanceof Error
+                ? error.name
+                : "UnknownError"
+          };
+
+    app.log.error(
+      detail,
+      "ShadowSpec capture disabled because its config file could not be loaded."
+    );
+
+    return undefined;
+  }
 }
 
 function getCaptureErrorDetails(
@@ -61,6 +120,7 @@ function getCaptureErrorDetails(
     error instanceof Error
       ? error.name
       : "UnknownError";
+
   const errorCode =
     error !== null &&
     typeof error === "object" &&
@@ -68,6 +128,7 @@ function getCaptureErrorDetails(
     typeof error.code === "string"
       ? error.code
       : undefined;
+
   const errorStage =
     error !== null &&
     typeof error === "object" &&
@@ -80,10 +141,14 @@ function getCaptureErrorDetails(
     errorName,
     ...(errorCode === undefined
       ? {}
-      : { errorCode }),
+      : {
+          errorCode
+        }),
     ...(errorStage === undefined
       ? {}
-      : { errorStage })
+      : {
+          errorStage
+        })
   };
 }
 
@@ -91,23 +156,68 @@ function getPrivacyErrorDetails(
   error: CapturePrivacyError
 ) {
   return {
-    errorName: error.name,
-    errorCode: error.code,
-    ...(error.location === undefined
+    errorName:
+      error.name,
+    errorCode:
+      error.code,
+    ...(error.location ===
+    undefined
       ? {}
-      : { errorLocation: error.location }),
-    ...(error.pointer === undefined
+      : {
+          errorLocation:
+            error.location
+        }),
+    ...(error.pointer ===
+    undefined
       ? {}
-      : { errorPointer: error.pointer.slice(0, 256) }),
-    ...(error.headerName === undefined
+      : {
+          errorPointer:
+            error.pointer.slice(
+              0,
+              256
+            )
+        }),
+    ...(error.headerName ===
+    undefined
       ? {}
-      : { errorHeader: error.headerName }),
-    ...(error.tableName === undefined
+      : {
+          errorHeader:
+            error.headerName
+        }),
+    ...(error.tableName ===
+    undefined
       ? {}
-      : { errorTable: error.tableName }),
-    ...(error.columnName === undefined
+      : {
+          errorTable:
+            error.tableName
+        }),
+    ...(error.columnName ===
+    undefined
       ? {}
-      : { errorColumn: error.columnName })
+      : {
+          errorColumn:
+            error.columnName
+        })
+  };
+}
+
+function resolvePrivacyOptions(
+  options:
+    CapturePrivacyOptions |
+    undefined,
+  config:
+    ShadowSpecConfig |
+    undefined
+): CapturePrivacyOptions {
+  return {
+    ...options,
+
+    snapshotAllowedColumns:
+      options
+        ?.snapshotAllowedColumns ??
+      config
+        ?.privacy
+        .snapshotAllowedColumns
   };
 }
 
@@ -115,64 +225,135 @@ export function registerShadowSpec(
   app: FastifyInstance,
   options: ShadowSpecOptions
 ): void {
+  const config =
+    loadRuntimeConfig(
+      app,
+      options.configFile === true
+    );
+
+  /*
+   * If configFile was explicitly requested but the
+   * config could not be loaded, fail closed with
+   * respect to capture.
+   */
+  if (
+    options.configFile === true &&
+    config === undefined
+  ) {
+    return;
+  }
+
   const enabled =
     options.enabled ??
-    process.env.SHADOWSPEC_CAPTURE === "true";
+    config?.capture.enabled ??
+    (
+      process.env.SHADOWSPEC_CAPTURE ===
+      "true"
+    );
 
   if (!enabled) {
     return;
   }
+
   const tables = [
-    ...(options.tables ??
-      getConfiguredTables())
+    ...(
+      options.tables ??
+      config?.tables ??
+      getConfiguredTables()
+    )
   ];
 
+  const privacyOptions =
+    resolvePrivacyOptions(
+      options.privacy,
+      config
+    );
+
   let privacyPolicy;
+
   try {
-    privacyPolicy = compileCapturePrivacyPolicy(options.privacy, tables);
+    privacyPolicy =
+      compileCapturePrivacyPolicy(
+        privacyOptions,
+        tables
+      );
   } catch (error) {
-    const failure = error instanceof CapturePrivacyError
-      ? error
-      : new CapturePrivacyError(
-          "CAPTURE_PRIVACY_CONFIGURATION_INVALID",
-          "ShadowSpec privacy configuration is invalid."
-        );
+    const failure =
+      error instanceof CapturePrivacyError
+        ? error
+        : new CapturePrivacyError(
+            "CAPTURE_PRIVACY_CONFIGURATION_INVALID",
+            "ShadowSpec privacy configuration is invalid."
+          );
+
     app.log.error(
-      getPrivacyErrorDetails(failure),
+      getPrivacyErrorDetails(
+        failure
+      ),
       "ShadowSpec capture disabled because its privacy configuration is invalid."
     );
+
     return;
   }
 
   const applicationPool =
     options.applicationPool;
+
   const capturePool =
-    options.capturePool ?? applicationPool;
+    options.capturePool ??
+    applicationPool;
+
   const schema =
     options.schema ??
+    config?.schema ??
     process.env.SHADOWSPEC_SCHEMA ??
     "public";
+
   const configuredTimeout =
-    process.env.SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS;
+    process.env
+      .SHADOWSPEC_SNAPSHOT_STATEMENT_TIMEOUT_MS;
+
   const snapshotStatementTimeoutMs =
-    options.snapshotStatementTimeoutMs ??
-    (configuredTimeout === undefined
-      ? undefined
-      : Number(configuredTimeout));
+    options
+      .snapshotStatementTimeoutMs ??
+    (
+      configuredTimeout ===
+      undefined
+        ? undefined
+        : Number(
+            configuredTimeout
+          )
+    );
+
   const configuredSnapshotTimeout =
-    process.env.SHADOWSPEC_SNAPSHOT_TIMEOUT_MS;
+    process.env
+      .SHADOWSPEC_SNAPSHOT_TIMEOUT_MS;
+
   const snapshotTimeoutMs =
     options.snapshotTimeoutMs ??
-    (configuredSnapshotTimeout === undefined
-      ? undefined
-      : Number(configuredSnapshotTimeout));
+    (
+      configuredSnapshotTimeout ===
+      undefined
+        ? undefined
+        : Number(
+            configuredSnapshotTimeout
+          )
+    );
+
   const configuredRecorderTimeout =
-    process.env.SHADOWSPEC_RECORDER_TIMEOUT_MS;
+    process.env
+      .SHADOWSPEC_RECORDER_TIMEOUT_MS;
+
   const recorderTimeoutMs =
     options.recorderTimeoutMs ??
-    (configuredRecorderTimeout === undefined
-      ? undefined
-      : Number(configuredRecorderTimeout));
+    (
+      configuredRecorderTimeout ===
+      undefined
+        ? undefined
+        : Number(
+            configuredRecorderTimeout
+          )
+    );
 
   app.decorateRequest(
     "shadowSpecSnapshot",
@@ -188,26 +369,48 @@ export function registerShadowSpec(
     "preHandler",
     async (request) => {
       if (
-        request.url.split("?")[0] ===
+        request.url.split(
+          "?"
+        )[0] ===
         REPLAY_TARGET_ENDPOINT
       ) {
         return;
       }
 
       try {
-        assertRequestPrivacy(privacyPolicy, {
-          headers: request.headers,
-          body: request.body,
-          query: request.query,
-          pathParams: request.params
-        });
+        assertRequestPrivacy(
+          privacyPolicy,
+          {
+            headers:
+              request.headers,
+            body:
+              request.body,
+            query:
+              request.query,
+            pathParams:
+              request.params
+          }
+        );
       } catch (error) {
-        if (!(error instanceof CapturePrivacyError)) throw error;
-        request.shadowSpecSnapshot = undefined;
+        if (
+          !(
+            error instanceof
+            CapturePrivacyError
+          )
+        ) {
+          throw error;
+        }
+
+        request.shadowSpecSnapshot =
+          undefined;
+
         request.log.error(
-          getPrivacyErrorDetails(error),
+          getPrivacyErrorDetails(
+            error
+          ),
           "ShadowSpec request capture rejected by its privacy policy."
         );
+
         return;
       }
 
@@ -217,7 +420,8 @@ export function registerShadowSpec(
         ];
 
       request.shadowSpecSessionId =
-        typeof sessionId === "string"
+        typeof sessionId ===
+        "string"
           ? sessionId
           : undefined;
 
@@ -228,20 +432,30 @@ export function registerShadowSpec(
             tables,
             {
               schema,
+
               statementTimeoutMs:
                 snapshotStatementTimeoutMs,
+
               snapshotTimeoutMs,
+
               snapshotAllowedColumns:
-                privacyPolicy.snapshotAllowedColumns
+                privacyPolicy
+                  .snapshotAllowedColumns
             }
           );
       } catch (error) {
         request.shadowSpecSnapshot =
           undefined;
+
         request.log.error(
-          error instanceof CapturePrivacyError
-            ? getPrivacyErrorDetails(error)
-            : getCaptureErrorDetails(error),
+          error instanceof
+            CapturePrivacyError
+            ? getPrivacyErrorDetails(
+                error
+              )
+            : getCaptureErrorDetails(
+                error
+              ),
           "ShadowSpec snapshot capture failed; request will not be recorded."
         );
       }
@@ -255,13 +469,18 @@ export function registerShadowSpec(
       reply,
       payload
     ) => {
-      let responseBody: unknown =
-        payload;
+      let responseBody:
+        unknown = payload;
 
-      if (typeof payload === "string") {
+      if (
+        typeof payload ===
+        "string"
+      ) {
         try {
           responseBody =
-            JSON.parse(payload);
+            JSON.parse(
+              payload
+            );
         } catch {
           responseBody =
             payload;
@@ -269,20 +488,35 @@ export function registerShadowSpec(
       }
 
       if (
-        request.shadowSpecSnapshot ===
+        request
+          .shadowSpecSnapshot ===
         undefined
       ) {
         return payload;
       }
 
       try {
-        assertResponsePrivacy(privacyPolicy, responseBody);
+        assertResponsePrivacy(
+          privacyPolicy,
+          responseBody
+        );
       } catch (error) {
-        if (!(error instanceof CapturePrivacyError)) throw error;
+        if (
+          !(
+            error instanceof
+            CapturePrivacyError
+          )
+        ) {
+          throw error;
+        }
+
         request.log.error(
-          getPrivacyErrorDetails(error),
+          getPrivacyErrorDetails(
+            error
+          ),
           "ShadowSpec response capture rejected by its privacy policy."
         );
+
         return payload;
       }
 
@@ -290,7 +524,9 @@ export function registerShadowSpec(
         await recordApiRequest(
           capturePool,
           request.method,
-          request.url.split("?")[0],
+          request.url.split(
+            "?"
+          )[0],
           request.body ?? null,
           request.params as Record<
             string,
@@ -302,13 +538,20 @@ export function registerShadowSpec(
           >,
           reply.statusCode,
           responseBody,
-          request.shadowSpecSnapshot,
-          request.shadowSpecSessionId,
-          { timeoutMs: recorderTimeoutMs }
+          request
+            .shadowSpecSnapshot,
+          request
+            .shadowSpecSessionId,
+          {
+            timeoutMs:
+              recorderTimeoutMs
+          }
         );
       } catch (error) {
         request.log.error(
-          getCaptureErrorDetails(error),
+          getCaptureErrorDetails(
+            error
+          ),
           "ShadowSpec recorder write failed; response will be sent unchanged."
         );
       }
