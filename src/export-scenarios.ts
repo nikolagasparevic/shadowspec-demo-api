@@ -1184,9 +1184,13 @@ export async function exportScenarios(
   );
 }
 
-if (require.main === module) {
+export function runExportCli(): void {
   exportScenarios().catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });
+}
+
+if (require.main === module) {
+  runExportCli();
 }

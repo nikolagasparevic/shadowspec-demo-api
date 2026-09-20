@@ -4,6 +4,9 @@
   "description": "Behavioral regression testing from production traffic",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "shadowspec": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

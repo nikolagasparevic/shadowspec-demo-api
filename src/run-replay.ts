@@ -359,16 +359,19 @@ export async function runReplay(
   return result;
 }
 
-if (require.main === module) {
+export function runReplayCli(): void {
   try {
     const identity = parseRunIdentity(process.env);
     const startedAt = new Date().toISOString();
     let interrupted = false;
+
     const handleSignal = (signal: NodeJS.Signals) => {
       if (interrupted) {
         return;
       }
+
       interrupted = true;
+
       try {
         const result = createInterruptedResult(
           identity,
@@ -385,6 +388,7 @@ if (require.main === module) {
             failures: []
           }
         );
+
         publishRunResultAtomically(
           getRunResultPath(identity),
           result
@@ -394,7 +398,12 @@ if (require.main === module) {
           "RUN_RESULT_WRITE_FAILED: ShadowSpec could not publish an interrupted run result."
         );
       }
-      process.exit(signal === "SIGINT" ? 130 : 143);
+
+      process.exit(
+        signal === "SIGINT"
+          ? 130
+          : 143
+      );
     };
 
     process.once("SIGINT", handleSignal);
@@ -403,25 +412,36 @@ if (require.main === module) {
     runReplay({ identity }).catch((error) => {
       if (
         error instanceof Error &&
-        (error.message.startsWith("ShadowSpec detected ") ||
+        (
+          error.message.startsWith("ShadowSpec detected ") ||
           error.message ===
-            "ShadowSpec found no executable behavioral checks.")
+            "ShadowSpec found no executable behavioral checks."
+        )
       ) {
         console.error(error.message);
         process.exitCode = 1;
         return;
       }
+
       const classified = classifyRunError(error);
+
       console.error(
         `${classified.fatalError.code}: ${classified.fatalError.message}`
       );
+
       process.exitCode = 1;
     });
   } catch (error) {
     const classified = classifyRunError(error);
+
     console.error(
       `${classified.fatalError.code}: ${classified.fatalError.message}`
     );
+
     process.exitCode = 1;
   }
+}
+
+if (require.main === module) {
+  runReplayCli();
 }
