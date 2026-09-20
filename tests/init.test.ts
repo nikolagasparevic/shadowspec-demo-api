@@ -2,290 +2,401 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
 } from "vitest";
 import {
-  InitError,
-  defaultConfig,
-  detectDependencies,
-  runInit
+    InitError,
+    defaultConfig,
+    detectDependencies,
+    runInit
 } from "../src/init";
 
 const tempDirectories: string[] = [];
 
 function createTempProject(): string {
-  const directory = fs.mkdtempSync(
-    path.join(
-      os.tmpdir(),
-      "shadowspec-init-"
-    )
-  );
+    const directory = fs.mkdtempSync(
+        path.join(
+            os.tmpdir(),
+            "shadowspec-init-"
+        )
+    );
 
-  tempDirectories.push(directory);
+    tempDirectories.push(directory);
 
-  return directory;
+    return directory;
 }
 
 function writePackageJson(
-  directory: string,
-  value: unknown
+    directory: string,
+    value: unknown
 ): void {
-  fs.writeFileSync(
-    path.join(
-      directory,
-      "package.json"
-    ),
-    `${JSON.stringify(
-      value,
-      null,
-      2
-    )}\n`,
-    "utf8"
-  );
+    fs.writeFileSync(
+        path.join(
+            directory,
+            "package.json"
+        ),
+        `${JSON.stringify(
+            value,
+            null,
+            2
+        )}\n`,
+        "utf8"
+    );
 }
 
 afterEach(() => {
-  vi.restoreAllMocks();
+    vi.restoreAllMocks();
 
-  for (
-    const directory of tempDirectories.splice(0)
-  ) {
-    fs.rmSync(
-      directory,
-      {
-        recursive: true,
-        force: true
-      }
-    );
-  }
+    for (
+        const directory of tempDirectories.splice(0)
+    ) {
+        fs.rmSync(
+            directory,
+            {
+                recursive: true,
+                force: true
+            }
+        );
+    }
 });
 
 describe("ShadowSpec init", () => {
-  it("rejects a directory without package.json", async () => {
-    const directory =
-      createTempProject();
+    it("rejects a directory without package.json", async () => {
+        const directory =
+            createTempProject();
 
-    await expect(
-      runInit(directory)
-    ).rejects.toMatchObject({
-      name: "InitError",
-      code: "INIT_NOT_NODE_PROJECT"
+        await expect(
+            runInit(directory)
+        ).rejects.toMatchObject({
+            name: "InitError",
+            code: "INIT_NOT_NODE_PROJECT"
+        });
     });
-  });
 
-  it("rejects an invalid package.json", async () => {
-    const directory =
-      createTempProject();
+    it("rejects an invalid package.json", async () => {
+        const directory =
+            createTempProject();
 
-    fs.writeFileSync(
-      path.join(
-        directory,
-        "package.json"
-      ),
-      "{ invalid json",
-      "utf8"
-    );
+        fs.writeFileSync(
+            path.join(
+                directory,
+                "package.json"
+            ),
+            "{ invalid json",
+            "utf8"
+        );
 
-    await expect(
-      runInit(directory)
-    ).rejects.toMatchObject({
-      name: "InitError",
-      code: "INIT_PACKAGE_JSON_INVALID"
+        await expect(
+            runInit(directory)
+        ).rejects.toMatchObject({
+            name: "InitError",
+            code: "INIT_PACKAGE_JSON_INVALID"
+        });
     });
-  });
 
-  it("creates the default ShadowSpec config", async () => {
-    const directory =
-      createTempProject();
+    it("rejects unknown init arguments", async () => {
+        const {
+            runInitCli
+        } = await import("../src/init");
 
-    writePackageJson(
-      directory,
-      {
-        name: "example-project",
-        dependencies: {
-          shadowspec: "^0.1.0",
-          fastify: "^5.0.0",
-          pg: "^8.0.0"
+        const originalArgv =
+            process.argv;
+
+        process.argv = [
+            "node",
+            "shadowspec",
+            "init",
+            "--unknown"
+        ];
+
+        try {
+            await expect(
+                runInitCli()
+            ).rejects.toMatchObject({
+                code: "INIT_ARGUMENT_INVALID"
+            });
+        } finally {
+            process.argv =
+                originalArgv;
         }
-      }
-    );
+    });
 
-    vi.spyOn(
-      console,
-      "log"
-    ).mockImplementation(
-      () => undefined
-    );
+    it("accepts a custom schema argument", async () => {
+        const tempDir = fs.mkdtempSync(
+            path.join(
+                os.tmpdir(),
+                "shadowspec-init-schema-"
+            )
+        );
 
-    await runInit(directory);
+        try {
+            fs.writeFileSync(
+                path.join(
+                    tempDir,
+                    "package.json"
+                ),
+                JSON.stringify({
+                    dependencies: {
+                        shadowspec: "0.1.0",
+                        fastify: "5.12.4",
+                        pg: "8.23.0"
+                    }
+                })
+            );
 
-    const configPath =
-      path.join(
-        directory,
-        "shadowspec.config.json"
-      );
+            await runInit(
+                tempDir,
+                {
+                    schema: "app"
+                }
+            );
 
-    expect(
-      fs.existsSync(configPath)
-    ).toBe(true);
+            const config =
+                JSON.parse(
+                    fs.readFileSync(
+                        path.join(
+                            tempDir,
+                            "shadowspec.config.json"
+                        ),
+                        "utf8"
+                    )
+                );
 
-    const config =
-      JSON.parse(
-        fs.readFileSync(
-          configPath,
-          "utf8"
-        )
-      );
-
-    expect(config).toEqual(
-      defaultConfig()
-    );
-  });
-
-  it("detects dependencies from dependencies and devDependencies", () => {
-    expect(
-      detectDependencies({
-        dependencies: {
-          shadowspec: "^0.1.0",
-          pg: "^8.0.0"
-        },
-        devDependencies: {
-          fastify: "^5.0.0"
+            expect(
+                config.schema
+            ).toBe("app");
+        } finally {
+            fs.rmSync(
+                tempDir,
+                {
+                    recursive: true,
+                    force: true
+                }
+            );
         }
-      })
-    ).toEqual({
-      shadowspec: true,
-      fastify: true,
-      pg: true
-    });
-  });
-
-  it("reports missing dependencies", () => {
-    expect(
-      detectDependencies({})
-    ).toEqual({
-      shadowspec: false,
-      fastify: false,
-      pg: false
-    });
-  });
-
-  it("refuses to overwrite an existing config", async () => {
-    const directory =
-      createTempProject();
-
-    writePackageJson(
-      directory,
-      {
-        name: "example-project"
-      }
-    );
-
-    const configPath =
-      path.join(
-        directory,
-        "shadowspec.config.json"
-      );
-
-    const original =
-      `{"custom":true}\n`;
-
-    fs.writeFileSync(
-      configPath,
-      original,
-      "utf8"
-    );
-
-    await expect(
-      runInit(directory)
-    ).rejects.toMatchObject({
-      name: "InitError",
-      code: "INIT_CONFIG_EXISTS"
     });
 
-    expect(
-      fs.readFileSync(
-        configPath,
-        "utf8"
-      )
-    ).toBe(original);
-  });
+    it("rejects --schema without a value", async () => {
+        const {
+            runInitCli
+        } = await import("../src/init");
 
-  it("prints dependency status and next steps", async () => {
-    const directory =
-      createTempProject();
+        await expect(
+            runInitCli([
+                "--schema"
+            ])
+        ).rejects.toMatchObject({
+            code: "INIT_ARGUMENT_INVALID"
+        });
+    });
 
-    writePackageJson(
-      directory,
-      {
-        name: "example-project",
-        dependencies: {
-          shadowspec: "^0.1.0",
-          fastify: "^5.0.0"
-        }
-      }
-    );
+    it("keeps snapshotAllowedColumns empty by default", () => {
+        expect(
+            defaultConfig()
+        ).toEqual({
+            schema: "public",
+            tables: [],
+            capture: {
+                enabled: true
+            },
+            privacy: {
+                snapshotAllowedColumns: {}
+            }
+        });
+    });
 
-    const log =
-      vi.spyOn(
-        console,
-        "log"
-      ).mockImplementation(
-        () => undefined
-      );
+    it("creates the default ShadowSpec config", async () => {
+        const directory =
+            createTempProject();
 
-    await runInit(directory);
+        writePackageJson(
+            directory,
+            {
+                name: "example-project",
+                dependencies: {
+                    shadowspec: "^0.1.0",
+                    fastify: "^5.0.0",
+                    pg: "^8.0.0"
+                }
+            }
+        );
 
-    const output =
-      log.mock.calls
-        .map(
-          ([message]) =>
-            String(message)
-        )
-        .join("\n");
+        vi.spyOn(
+            console,
+            "log"
+        ).mockImplementation(
+            () => undefined
+        );
 
-    expect(output).toContain(
-      "Created shadowspec.config.json"
-    );
+        await runInit(directory);
 
-    expect(output).toContain(
-      "shadowspec: found"
-    );
+        const configPath =
+            path.join(
+                directory,
+                "shadowspec.config.json"
+            );
 
-    expect(output).toContain(
-      "fastify:    found"
-    );
+        expect(
+            fs.existsSync(configPath)
+        ).toBe(true);
 
-    expect(output).toContain(
-      "pg:         missing"
-    );
+        const config =
+            JSON.parse(
+                fs.readFileSync(
+                    configPath,
+                    "utf8"
+                )
+            );
 
-    expect(output).toContain(
-      "npm install pg"
-    );
-  });
+        expect(config).toEqual(
+            defaultConfig()
+        );
+    });
 
-  it("uses InitError for init failures", () => {
-    const error =
-      new InitError(
-        "INIT_WRITE_FAILED",
-        "example"
-      );
+    it("detects dependencies from dependencies and devDependencies", () => {
+        expect(
+            detectDependencies({
+                dependencies: {
+                    shadowspec: "^0.1.0",
+                    pg: "^8.0.0"
+                },
+                devDependencies: {
+                    fastify: "^5.0.0"
+                }
+            })
+        ).toEqual({
+            shadowspec: true,
+            fastify: true,
+            pg: true
+        });
+    });
 
-    expect(error).toBeInstanceOf(
-      Error
-    );
+    it("reports missing dependencies", () => {
+        expect(
+            detectDependencies({})
+        ).toEqual({
+            shadowspec: false,
+            fastify: false,
+            pg: false
+        });
+    });
 
-    expect(error.name).toBe(
-      "InitError"
-    );
+    it("refuses to overwrite an existing config", async () => {
+        const directory =
+            createTempProject();
 
-    expect(error.code).toBe(
-      "INIT_WRITE_FAILED"
-    );
-  });
+        writePackageJson(
+            directory,
+            {
+                name: "example-project"
+            }
+        );
+
+        const configPath =
+            path.join(
+                directory,
+                "shadowspec.config.json"
+            );
+
+        const original =
+            `{"custom":true}\n`;
+
+        fs.writeFileSync(
+            configPath,
+            original,
+            "utf8"
+        );
+
+        await expect(
+            runInit(directory)
+        ).rejects.toMatchObject({
+            name: "InitError",
+            code: "INIT_CONFIG_EXISTS"
+        });
+
+        expect(
+            fs.readFileSync(
+                configPath,
+                "utf8"
+            )
+        ).toBe(original);
+    });
+
+    it("prints dependency status and next steps", async () => {
+        const directory =
+            createTempProject();
+
+        writePackageJson(
+            directory,
+            {
+                name: "example-project",
+                dependencies: {
+                    shadowspec: "^0.1.0",
+                    fastify: "^5.0.0"
+                }
+            }
+        );
+
+        const log =
+            vi.spyOn(
+                console,
+                "log"
+            ).mockImplementation(
+                () => undefined
+            );
+
+        await runInit(directory);
+
+        const output =
+            log.mock.calls
+                .map(
+                    ([message]) =>
+                        String(message)
+                )
+                .join("\n");
+
+        expect(output).toContain(
+            "Created shadowspec.config.json"
+        );
+
+        expect(output).toContain(
+            "shadowspec: found"
+        );
+
+        expect(output).toContain(
+            "fastify:    found"
+        );
+
+        expect(output).toContain(
+            "pg:         missing"
+        );
+
+        expect(output).toContain(
+            "npm install pg"
+        );
+    });
+
+    it("uses InitError for init failures", () => {
+        const error =
+            new InitError(
+                "INIT_WRITE_FAILED",
+                "example"
+            );
+
+        expect(error).toBeInstanceOf(
+            Error
+        );
+
+        expect(error.name).toBe(
+            "InitError"
+        );
+
+        expect(error.code).toBe(
+            "INIT_WRITE_FAILED"
+        );
+    });
 });
