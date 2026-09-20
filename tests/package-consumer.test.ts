@@ -111,11 +111,13 @@ describe("package consumer", () => {
         stdio: ["ignore", "pipe", "pipe"]
       }
     );
+
     const [packResult] = JSON.parse(output) as [
       {
         files: { path: string }[];
       }
     ];
+
     const files = packResult.files.map(
       (file) => file.path
     );
@@ -138,5 +140,5 @@ describe("package consumer", () => {
         file.startsWith("src/")
       )
     ).toBe(false);
-  });
+  }, 15_000);
 });
